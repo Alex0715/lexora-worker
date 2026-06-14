@@ -298,6 +298,7 @@ _MODEL_RECOMMENDATIONS = {
     "gpu_small":   ("meta-llama/Llama-3.2-3B-Instruct",          "Llama 3.2 3B  (fast, NVIDIA)"),
     "gpu_medium":  ("meta-llama/Llama-3.1-8B-Instruct",          "Llama 3.1 8B  (balanced, NVIDIA)"),
     "gpu_large":   ("meta-llama/Llama-3.1-70B-Instruct",         "Llama 3.1 70B (powerful, NVIDIA)"),
+    "gpu_image":   ("black-forest-labs/FLUX.1-schnell",          "FLUX.1 Schnell (image generation, NVIDIA)"),
     "cpu":         ("microsoft/Phi-3-mini-4k-instruct",           "Phi-3 Mini    (CPU-friendly)"),
 }
 
@@ -319,6 +320,8 @@ def _recommend_models(gpu_model: str, vram_gb: float) -> list[tuple[str, str]]:
         return opts
 
     opts = [_MODEL_RECOMMENDATIONS["gpu_small"]]
+    if vram_gb >= 8:
+        opts.append(_MODEL_RECOMMENDATIONS["gpu_image"])
     if vram_gb >= 12:
         opts.append(_MODEL_RECOMMENDATIONS["gpu_medium"])
     if vram_gb >= 40:
@@ -424,10 +427,7 @@ def setup() -> None:
 
     # ── Step 2: orchestrator URL ──────────────────────────────────────────────
     cfg = load_config()
-    orchestrator_url = Prompt.ask(
-        "[cyan]Orchestrator URL[/cyan]",
-        default=cfg.orchestrator_url or "https://api.lexora.network",
-    )
+    orchestrator_url = cfg.orchestrator_url or "https://api.lexora.network"
 
     # ── Step 3: worker token ──────────────────────────────────────────────────
     console.print()

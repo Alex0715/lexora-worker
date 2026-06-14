@@ -27,10 +27,48 @@ def _config_dir() -> Path:
     return _CONFIG_DIR
 
 
+def _keyring_get_token() -> str | None:
+    try:
+        return keyring.get_password(_SERVICE_NAME, "jwt_token")
+    except keyring.errors.KeyringError:
+        # Headless Linux boxes often have no usable keyring backend
+        # (no Secret Service / KWallet). Fall back to the config file.
+        if _CONFIG_FILE.exists():
+            raw = json.loads(_CONFIG_FILE.read_text())
+            return raw.get("token")
+        return None
+
+
+def _keyring_set_token(token: str) -> None:
+    try:
+        keyring.set_password(_SERVICE_NAME, "jwt_token", token)
+    except keyring.errors.KeyringError:
+        raw = {}
+        if _CONFIG_FILE.exists():
+            raw = json.loads(_CONFIG_FILE.read_text())
+        raw["token"] = token
+        _config_dir()
+        _CONFIG_FILE.write_text(json.dumps(raw, indent=2))
+
+
+def _keyring_delete_token() -> None:
+    try:
+        keyring.delete_password(_SERVICE_NAME, "jwt_token")
+    except keyring.errors.PasswordDeleteError:
+        pass
+    except keyring.errors.KeyringError:
+        pass
+
+    if _CONFIG_FILE.exists():
+        raw = json.loads(_CONFIG_FILE.read_text())
+        if raw.pop("token", None) is not None:
+            _CONFIG_FILE.write_text(json.dumps(raw, indent=2))
+
+
 def load_config() -> WorkerConfig:
     if _CONFIG_FILE.exists():
         raw = json.loads(_CONFIG_FILE.read_text())
-        cfg = WorkerConfig(**raw)
+        cfg = WorkerConfig(**{k: v for k, v in raw.items() if k != "token"})
     else:
         cfg = WorkerConfig()
 
@@ -40,7 +78,7 @@ def load_config() -> WorkerConfig:
     if env_cache_dir := os.environ.get("LEXORA_MODEL_CACHE_DIR"):
         cfg.model_cache_dir = env_cache_dir
 
-    token = keyring.get_password(_SERVICE_NAME, "jwt_token")
+    token = _keyring_get_token()
     if token:
         cfg.token = token
 
@@ -49,23 +87,20 @@ def load_config() -> WorkerConfig:
 
 def save_config(cfg: WorkerConfig) -> None:
     _config_dir()
-    # Never persist the raw token to disk — use keyring
+    # Never persist the raw token to disk if a keyring backend is available
     safe = cfg.model_dump(exclude={"token"})
     _CONFIG_FILE.write_text(json.dumps(safe, indent=2))
 
     if cfg.token:
-        keyring.set_password(_SERVICE_NAME, "jwt_token", cfg.token)
+        _keyring_set_token(cfg.token)
 
 
 def save_token(token: str) -> None:
-    keyring.set_password(_SERVICE_NAME, "jwt_token", token)
+    _keyring_set_token(token)
 
 
 def clear_token() -> None:
-    try:
-        keyring.delete_password(_SERVICE_NAME, "jwt_token")
-    except keyring.errors.PasswordDeleteError:
-        pass
+    _keyring_delete_token()
 
 
 def get_hardware_fingerprint() -> str:
