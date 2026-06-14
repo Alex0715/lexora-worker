@@ -93,7 +93,7 @@ Write-Step "Installing lexora-worker..."
 $ScriptDir = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $null }
 $WorkerPyproject = if ($ScriptDir) { Join-Path $ScriptDir "pyproject.toml" } else { $null }
 
-if (Test-Path $WorkerPyproject) {
+if ($WorkerPyproject -and (Test-Path $WorkerPyproject)) {
     $WorkerDir = Join-Path $ScriptDir "worker"
     if ($Extras) {
         & $Pip install --quiet -e "$WorkerDir[$Extras]"
