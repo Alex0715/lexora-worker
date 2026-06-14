@@ -5,6 +5,7 @@ import logging
 import os
 import signal
 import sys
+from pathlib import Path
 from typing import Optional
 
 # ── Keep the asyncio event loop schedulable during heavy CPU inference ──────────
@@ -143,7 +144,7 @@ def info() -> None:
 
 @app.command()
 def start(
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="HuggingFace model ID (auto-detected if omitted)"),
+    model: Optional[list[str]] = typer.Option(None, "--model", "-m", help="HuggingFace model ID (auto-detected if omitted). Repeat to preload multiple models."),
     max_concurrency: int = typer.Option(
         1, "--max-concurrency", "-c", min=1, max=16, help="Max parallel jobs"
     ),
@@ -162,12 +163,12 @@ def start(
         )
         raise typer.Exit(1)
 
-    if model is None:
+    if not model:
         from lexora_worker.hardware.profiler import build_hardware_profile
         profile = asyncio.run(build_hardware_profile())
         recommendations = _recommend_models(profile.gpu_model, profile.vram)
-        model = recommendations[0][0]
-        console.print(f"[dim]Auto-selected model: [bold]{model}[/bold][/dim]")
+        model = [recommendations[0][0]]
+        console.print(f"[dim]Auto-selected model: [bold]{model[0]}[/bold][/dim]")
 
     try:
         asyncio.run(
@@ -184,7 +185,7 @@ def start(
 
 async def _worker_main(
     cfg: WorkerConfig,
-    model_id: str,
+    model_id: str | list[str],
     max_concurrency: int,
     max_model_len: int,
 ) -> None:
@@ -199,21 +200,26 @@ async def _worker_main(
 
     profile = await build_hardware_profile(cfg.model_cache_dir)
 
-    # Resolve the requested alias/repo to the hardware variant that fits this
+    model_ids = [model_id] if isinstance(model_id, str) else list(model_id)
+
+    # Resolve each requested alias/repo to the hardware variant that fits this
     # node's VRAM *before* any weights are downloaded or loaded. A ValueError
     # here means no variant fits — exit cleanly instead of risking an OOM.
-    try:
-        resolved = resolve_model(model_id, profile.vram)
-    except ValueError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
-
-    resolved.apply_env()
-    model_id = resolved.model_id
+    resolved_ids: list[str] = []
+    resolved_labels: list[str] = []
+    for mid in model_ids:
+        try:
+            resolved = resolve_model(mid, profile.vram)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
+        resolved.apply_env()
+        resolved_ids.append(resolved.model_id)
+        resolved_labels.append(f"{resolved.model_id} [dim]({resolved.variant.label})[/dim]")
 
     console.print(
         Panel.fit(
-            f"Model: [cyan]{model_id}[/cyan] [dim]({resolved.variant.label})[/dim]\n"
+            f"Models: [cyan]{', '.join(resolved_labels)}[/cyan]\n"
             f"Concurrency: [cyan]{max_concurrency}[/cyan]\n"
             f"Orchestrator: [cyan]{cfg.orchestrator_url}[/cyan]",
             title="[bold green]Lexora Worker — Starting",
@@ -222,14 +228,21 @@ async def _worker_main(
 
     model_manager = ModelManager(model_cache_dir=cfg.model_cache_dir)
 
-    console.print(f"[dim]Loading model [bold]{model_id}[/bold]...[/dim]")
+    console.print(f"[dim]Loading model [bold]{resolved_ids[0]}[/bold]...[/dim]")
     try:
-        await model_manager.initialize(model_id, total_vram=profile.vram)
+        await model_manager.initialize(resolved_ids[0], total_vram=profile.vram)
     except Exception as exc:
         console.print(f"[red]Failed to load model: {exc}[/red]")
         raise typer.Exit(1) from exc
-
     console.print(f"[green]Model loaded[/green] ✓")
+
+    for extra_id in resolved_ids[1:]:
+        console.print(f"[dim]Loading model [bold]{extra_id}[/bold]...[/dim]")
+        try:
+            await model_manager.ensure_model_loaded(extra_id)
+            console.print(f"[green]Model loaded[/green] ✓")
+        except Exception as exc:
+            console.print(f"[yellow]⚠[/yellow] Failed to preload {extra_id}: {exc}")
 
     loop = asyncio.get_running_loop()
     node_id = cfg.node_id or get_hardware_fingerprint()[:16]
@@ -329,7 +342,7 @@ def _recommend_models(gpu_model: str, vram_gb: float) -> list[tuple[str, str]]:
     return opts
 
 
-def _install_service_mac(model: str, orchestrator_url: str) -> bool:
+def _install_service_mac(models: list[str], orchestrator_url: str) -> bool:
     """Install a launchd plist so the worker starts on login."""
     import shutil
     import subprocess
@@ -338,6 +351,8 @@ def _install_service_mac(model: str, orchestrator_url: str) -> bool:
     plist_path = plist_dir / "network.lexora.worker.plist"
     worker_bin = shutil.which("lexora-worker") or "lexora-worker"
     log_path = Path.home() / ".config" / "lexora-worker" / "worker.log"
+
+    model_args = "".join(f"<string>--model</string><string>{m}</string>\n    " for m in models)
 
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -349,9 +364,7 @@ def _install_service_mac(model: str, orchestrator_url: str) -> bool:
   <array>
     <string>{worker_bin}</string>
     <string>start</string>
-    <string>--model</string><string>{model}</string>
-    <string>--url</string><string>{orchestrator_url}</string>
-  </array>
+    {model_args}</array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>{log_path}</string>
@@ -364,7 +377,7 @@ def _install_service_mac(model: str, orchestrator_url: str) -> bool:
     return result.returncode == 0
 
 
-def _install_service_linux(model: str, orchestrator_url: str) -> bool:
+def _install_service_linux(models: list[str], orchestrator_url: str) -> bool:
     """Install a systemd user service so the worker starts on login."""
     import shutil
     import subprocess
@@ -374,12 +387,14 @@ def _install_service_linux(model: str, orchestrator_url: str) -> bool:
     worker_bin = shutil.which("lexora-worker") or "lexora-worker"
     log_path = Path.home() / ".config" / "lexora-worker" / "worker.log"
 
+    model_args = " ".join(f"--model {m}" for m in models)
+
     unit = f"""[Unit]
 Description=Lexora Worker Node
 After=network.target
 
 [Service]
-ExecStart={worker_bin} start --model {model} --url {orchestrator_url}
+ExecStart={worker_bin} start {model_args}
 Restart=always
 RestartSec=10
 StandardOutput=append:{log_path}
@@ -449,23 +464,32 @@ def setup() -> None:
     # ── Step 4: model selection ───────────────────────────────────────────────
     console.print()
     recommendations = _recommend_models(profile.gpu_model, profile.vram)
+    custom_idx = len(recommendations) + 1
     console.print("[bold]Recommended models for your hardware:[/bold]")
     for i, (model_id, label) in enumerate(recommendations, 1):
         console.print(f"  [cyan]{i}[/cyan]. {label}")
         console.print(f"     [dim]{model_id}[/dim]")
-    console.print(f"  [cyan]{len(recommendations) + 1}[/cyan]. Enter custom model ID")
+    console.print(f"  [cyan]{custom_idx}[/cyan]. Enter custom model ID")
     console.print()
+    console.print("[dim]Select one or more (e.g. \"1,2\") if your VRAM can fit multiple models.[/dim]")
 
-    choice = Prompt.ask(
-        "Select model",
-        choices=[str(i) for i in range(1, len(recommendations) + 2)],
-        default="1",
-    )
-    choice_idx = int(choice) - 1
-    if choice_idx < len(recommendations):
-        selected_model = recommendations[choice_idx][0]
-    else:
-        selected_model = Prompt.ask("[cyan]Enter HuggingFace model ID[/cyan]")
+    valid_choices = {str(i) for i in range(1, custom_idx + 1)}
+    while True:
+        raw_choice = Prompt.ask("Select model(s)", default="1")
+        picks = [p.strip() for p in raw_choice.split(",") if p.strip()]
+        if picks and all(p in valid_choices for p in picks):
+            break
+        console.print(f"[red]Enter a comma-separated list of numbers between 1 and {custom_idx}.[/red]")
+
+    selected_models: list[str] = []
+    for pick in picks:
+        idx = int(pick) - 1
+        if idx < len(recommendations):
+            selected_models.append(recommendations[idx][0])
+        else:
+            selected_models.append(Prompt.ask("[cyan]Enter HuggingFace model ID[/cyan]"))
+    # De-duplicate while preserving order.
+    selected_models = list(dict.fromkeys(selected_models))
 
     # ── Step 5: save config & login ───────────────────────────────────────────
     console.print()
@@ -484,13 +508,13 @@ def setup() -> None:
     if install_service:
         sys_platform = _platform.system()
         if sys_platform == "Darwin":
-            ok = _install_service_mac(selected_model, orchestrator_url)
+            ok = _install_service_mac(selected_models, orchestrator_url)
             if ok:
                 console.print("[green]✓[/green] Installed as launchd service (auto-starts on login)")
             else:
                 console.print("[yellow]⚠[/yellow] Service install failed — you can start manually with [bold]lexora-worker start[/bold]")
         elif sys_platform == "Linux":
-            ok = _install_service_linux(selected_model, orchestrator_url)
+            ok = _install_service_linux(selected_models, orchestrator_url)
             if ok:
                 console.print("[green]✓[/green] Installed as systemd user service (auto-starts on login)")
             else:
@@ -507,7 +531,7 @@ def setup() -> None:
             asyncio.run(
                 _worker_main(
                     cfg=cfg,
-                    model_id=selected_model,
+                    model_id=selected_models,
                     max_concurrency=1,
                     max_model_len=4096,
                 )
@@ -516,10 +540,11 @@ def setup() -> None:
             pass
     else:
         console.print()
+        start_cmd = "lexora-worker start " + " ".join(f"--model {m}" for m in selected_models)
         console.print(Panel.fit(
             f"[green]Setup complete![/green]\n\n"
             f"Start your node anytime:\n"
-            f"[bold cyan]lexora-worker start --model {selected_model}[/bold cyan]",
+            f"[bold cyan]{start_cmd}[/bold cyan]",
             title="[bold]Lexora Worker — Ready",
             border_style="green",
         ))
