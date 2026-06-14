@@ -455,20 +455,24 @@ def setup() -> None:
 
     # ── Step 3: worker token ──────────────────────────────────────────────────
     console.print()
-    web_url = os.environ.get("LEXORA_WEB_URL", orchestrator_url)
-    console.print(
-        Panel(
-            f"Get your worker token from:\n"
-            f"[bold cyan]{web_url}/provider/nodes[/bold cyan]\n\n"
-            f"Click [bold]Generate Worker Token[/bold] and paste it below.",
-            title="[bold yellow]Worker Token Required",
-            border_style="yellow",
+    if cfg.token:
+        console.print("[green]✓[/green] Using saved worker token")
+        token = cfg.token
+    else:
+        web_url = os.environ.get("LEXORA_WEB_URL", orchestrator_url)
+        console.print(
+            Panel(
+                f"Get your worker token from:\n"
+                f"[bold cyan]{web_url}/provider/nodes[/bold cyan]\n\n"
+                f"Click [bold]Generate Worker Token[/bold] and paste it below.",
+                title="[bold yellow]Worker Token Required",
+                border_style="yellow",
+            )
         )
-    )
-    token = Prompt.ask("[cyan]Paste your worker token[/cyan]", password=True)
-    if not token.strip():
-        console.print("[red]No token provided. Exiting.[/red]")
-        raise typer.Exit(1)
+        token = Prompt.ask("[cyan]Paste your worker token[/cyan]", password=True)
+        if not token.strip():
+            console.print("[red]No token provided. Exiting.[/red]")
+            raise typer.Exit(1)
 
     # ── Step 3b: HuggingFace token (for gated models like Llama/FLUX) ─────────
     console.print()
