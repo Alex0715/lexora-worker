@@ -55,7 +55,8 @@ if [ "$OS" = "Darwin" ]; then
 elif command -v nvidia-smi &>/dev/null; then
     GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || echo "Unknown GPU")
     success "NVIDIA GPU detected: $GPU_NAME — using vLLM backend"
-    EXTRAS="inference"
+    success "Image generation (FLUX) support will be installed"
+    EXTRAS="inference,image"
 else
     warn "No GPU detected — using CPU/HuggingFace backend (slower)"
     EXTRAS=""
