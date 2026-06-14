@@ -179,14 +179,31 @@ def resolve_model(alias: str, available_vram_gb: float) -> ResolvedModel:
             f"in MODEL_MANIFEST."
         )
 
+    import platform as _platform
+
     backend = _active_backend()
+    is_mac = _platform.system() == "Darwin"
+
+    # MLX variants only ever run on Mac, and "cuda"-tagged variants are
+    # PyTorch/CUDA checkpoints that won't load correctly via MLX. Exclude
+    # whichever family can never run on this OS *before* falling back —
+    # otherwise a transient `torch.cuda.is_available() == False` on a
+    # Windows/Linux CUDA box (driver issue, etc.) would fall through to an
+    # MLX-quantized checkpoint that transformers can't load.
+    platform_variants = [
+        v for v in variants
+        if (v.backend != "mlx" or is_mac) and (v.backend != "cuda" or not is_mac)
+    ]
+    if not platform_variants:
+        platform_variants = list(variants)
 
     # Keep variants that match the active backend (or have no backend restriction).
-    compatible = [v for v in variants if v.backend is None or v.backend == backend]
+    compatible = [v for v in platform_variants if v.backend is None or v.backend == backend]
 
-    # Fall back to all variants if nothing matches (e.g. unknown backend).
+    # Fall back to all platform-compatible variants if nothing matches (e.g.
+    # CUDA reported unavailable but this is still the only sane option).
     if not compatible:
-        compatible = list(variants)
+        compatible = platform_variants
 
     floor = min(v.min_vram_gb for v in compatible)
     if available_vram_gb < floor:
