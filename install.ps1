@@ -90,8 +90,8 @@ $WorkerBin = "$VenvDir\Scripts\lexora-worker.exe"
 Write-Step "Installing lexora-worker..."
 & $Pip install --quiet --upgrade pip
 
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$WorkerPyproject = Join-Path $ScriptDir "worker\pyproject.toml"
+$ScriptDir = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $null }
+$WorkerPyproject = if ($ScriptDir) { Join-Path $ScriptDir "pyproject.toml" } else { $null }
 
 if (Test-Path $WorkerPyproject) {
     $WorkerDir = Join-Path $ScriptDir "worker"
