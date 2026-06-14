@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import platform
 import threading
 import time
@@ -137,6 +138,14 @@ class InferenceEngine:
         self._mlx_model, self._mlx_tokenizer = await loop.run_in_executor(None, _load)
 
     async def _load_vllm(self) -> None:
+        # The hardware profiler (and other earlier startup code) calls
+        # torch.cuda.* in this process, initializing a CUDA context. vLLM's
+        # default "fork" multiprocessing start method can't re-init CUDA in
+        # the forked EngineCore subprocess ("Cannot re-initialize CUDA in
+        # forked subprocess"). Force "spawn" so the subprocess gets a fresh
+        # interpreter instead of a fork of this CUDA-initialized one.
+        os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+
         args = AsyncEngineArgs(
             model=self.model_id,
             max_model_len=self.max_model_len,
