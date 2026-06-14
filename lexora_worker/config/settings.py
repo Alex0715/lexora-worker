@@ -21,6 +21,22 @@ _CONFIG_FILE = _CONFIG_DIR / "config.json"
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 load_dotenv()
 
+def _apply_hf_token(token: str) -> None:
+    """Write the HF token to huggingface_hub's cache so every `from_pretrained`
+    call (which checks the cached token, not HF_TOKEN) can access gated repos
+    (Llama, FLUX) without each node needing its own `.env` file."""
+    if not token:
+        return
+    try:
+        from huggingface_hub import login as _hf_login
+        _hf_login(token=token, add_to_git_credential=False)
+    except Exception:
+        pass
+
+
+# Apply HF_TOKEN from the environment (`.env` or shell) immediately, if present.
+_apply_hf_token(os.environ.get("HF_TOKEN", ""))
+
 
 def _config_dir() -> Path:
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -81,6 +97,14 @@ def load_config() -> WorkerConfig:
     token = _keyring_get_token()
     if token:
         cfg.token = token
+
+    # Env var takes precedence; otherwise fall back to the persisted HF token
+    # (set via `lexora-worker setup` or `--hf-token`) so nodes without a
+    # `.env` file can still pull gated models.
+    if env_hf_token := os.environ.get("HF_TOKEN"):
+        cfg.hf_token = env_hf_token
+    if cfg.hf_token:
+        _apply_hf_token(cfg.hf_token)
 
     return cfg
 

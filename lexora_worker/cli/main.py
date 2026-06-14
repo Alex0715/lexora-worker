@@ -27,6 +27,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from lexora_worker.config.settings import (
+    _apply_hf_token,
     clear_token,
     get_hardware_fingerprint,
     load_config,
@@ -80,12 +81,20 @@ def login(
         "--url",
         help="Orchestrator base URL (defaults to DEPIN_ORCHESTRATOR_URL from .env)",
     ),
+    hf_token: Optional[str] = typer.Option(
+        None,
+        "--hf-token",
+        help="HuggingFace access token (needed to download gated models like Llama/FLUX)",
+    ),
 ) -> None:
     """Save worker JWT token to system keychain."""
     cfg = load_config()
     cfg.token = token
     if orchestrator_url:
         cfg.orchestrator_url = orchestrator_url
+    if hf_token:
+        cfg.hf_token = hf_token
+        _apply_hf_token(hf_token)
     save_config(cfg)
 
     fingerprint = get_hardware_fingerprint()
@@ -461,6 +470,27 @@ def setup() -> None:
         console.print("[red]No token provided. Exiting.[/red]")
         raise typer.Exit(1)
 
+    # ── Step 3b: HuggingFace token (for gated models like Llama/FLUX) ─────────
+    console.print()
+    console.print(
+        Panel(
+            "Some models (Llama, FLUX) are gated on HuggingFace and require an\n"
+            "access token with the model's license accepted.\n\n"
+            "Get one from: [bold cyan]https://huggingface.co/settings/tokens[/bold cyan]\n"
+            "Leave blank to skip (only ungated models will work).",
+            title="[bold yellow]HuggingFace Token (optional)",
+            border_style="yellow",
+        )
+    )
+    hf_token = Prompt.ask(
+        "[cyan]Paste your HuggingFace token[/cyan]",
+        password=True,
+        default=cfg.hf_token or "",
+        show_default=False,
+    )
+    if hf_token.strip():
+        _apply_hf_token(hf_token.strip())
+
     # ── Step 4: model selection ───────────────────────────────────────────────
     console.print()
     recommendations = _recommend_models(profile.gpu_model, profile.vram)
@@ -495,6 +525,8 @@ def setup() -> None:
     console.print()
     cfg.orchestrator_url = orchestrator_url
     cfg.token = token.strip()
+    if hf_token.strip():
+        cfg.hf_token = hf_token.strip()
     save_config(cfg)
     console.print("[green]✓[/green] Token saved to system keychain")
 

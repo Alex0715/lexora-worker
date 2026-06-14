@@ -183,6 +183,16 @@ class ImageInferenceEngine:
         vram_gb = _get_vram_gb()
         logger.info("FLUX load — VRAM: %.1f GB", vram_gb)
 
+        if vram_gb == 0:
+            raise RuntimeError(
+                "No CUDA GPU is visible to PyTorch (torch.cuda.is_available() "
+                "is False), so FLUX cannot be loaded — bitsandbytes/NF4 require "
+                "a CUDA device. This usually means your NVIDIA driver is too "
+                "old for the installed PyTorch/CUDA build. Update your GPU "
+                "driver from https://www.nvidia.com/Download/index.aspx and "
+                "restart the worker."
+            )
+
         if vram_gb >= 16:
             _require_safetensors(self.model_id)
             pipe = FluxPipeline.from_pretrained(

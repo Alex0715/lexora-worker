@@ -180,6 +180,7 @@ class ActiveJob(BaseModel):
 
 class WorkerConfig(BaseModel):
     token: str = ""
+    hf_token: str = ""
     node_id: str = ""
     orchestrator_url: str = Field(
         default_factory=lambda: os.environ.get("LEXORA_ORCHESTRATOR_URL", "https://api.lexora.network")
