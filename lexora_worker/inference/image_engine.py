@@ -117,8 +117,12 @@ class ImageInferenceEngine:
                 import torch  # noqa: F401
             except ImportError as exc:
                 raise RuntimeError(
-                    "Image inference requires diffusers and torch. "
-                    "pip install diffusers transformers accelerate"
+                    f"Image inference requires diffusers and torch, and failed "
+                    f"to import: {exc}. If they're already installed, this is "
+                    f"likely a broken/incompatible dependency in that import "
+                    f"chain — run `pip install --force-reinstall diffusers "
+                    f"transformers accelerate torch` in the worker venv to see "
+                    f"the full traceback."
                 ) from exc
 
             loop = asyncio.get_event_loop()

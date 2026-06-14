@@ -472,24 +472,29 @@ def setup() -> None:
 
     # ── Step 3b: HuggingFace token (for gated models like Llama/FLUX) ─────────
     console.print()
-    console.print(
-        Panel(
-            "Some models (Llama, FLUX) are gated on HuggingFace and require an\n"
-            "access token with the model's license accepted.\n\n"
-            "Get one from: [bold cyan]https://huggingface.co/settings/tokens[/bold cyan]\n"
-            "Leave blank to skip (only ungated models will work).",
-            title="[bold yellow]HuggingFace Token (optional)",
-            border_style="yellow",
+    if cfg.hf_token:
+        console.print("[green]✓[/green] Using saved HuggingFace token")
+        hf_token = cfg.hf_token
+        _apply_hf_token(hf_token)
+    else:
+        console.print(
+            Panel(
+                "Some models (Llama, FLUX) are gated on HuggingFace and require an\n"
+                "access token with the model's license accepted.\n\n"
+                "Get one from: [bold cyan]https://huggingface.co/settings/tokens[/bold cyan]\n"
+                "Leave blank to skip (only ungated models will work).",
+                title="[bold yellow]HuggingFace Token (optional)",
+                border_style="yellow",
+            )
         )
-    )
-    hf_token = Prompt.ask(
-        "[cyan]Paste your HuggingFace token[/cyan]",
-        password=True,
-        default=cfg.hf_token or "",
-        show_default=False,
-    )
-    if hf_token.strip():
-        _apply_hf_token(hf_token.strip())
+        hf_token = Prompt.ask(
+            "[cyan]Paste your HuggingFace token[/cyan]",
+            password=True,
+            default="",
+            show_default=False,
+        )
+        if hf_token.strip():
+            _apply_hf_token(hf_token.strip())
 
     # ── Step 4: model selection ───────────────────────────────────────────────
     console.print()
