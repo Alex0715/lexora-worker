@@ -90,29 +90,16 @@ $WorkerBin = "$VenvDir\Scripts\lexora-worker.exe"
 Write-Step "Installing lexora-worker..."
 & $Pip install --quiet --upgrade pip
 
-$ScriptDir = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { $null }
-$WorkerPyproject = if ($ScriptDir) { Join-Path $ScriptDir "pyproject.toml" } else { $null }
-
-if ($WorkerPyproject -and (Test-Path $WorkerPyproject)) {
-    $WorkerDir = Join-Path $ScriptDir "worker"
-    if ($Extras) {
-        & $Pip install --quiet -e "$WorkerDir[$Extras]"
-    } else {
-        & $Pip install --quiet -e $WorkerDir
-    }
+Write-Step "Downloading from GitHub..."
+$TmpZip = "$env:TEMP\lexora-worker.zip"
+Invoke-WebRequest "$RepoUrl/archive/refs/heads/main.zip" -OutFile $TmpZip
+$TmpDir = "$env:TEMP\lexora-worker-src"
+Expand-Archive $TmpZip -DestinationPath $TmpDir -Force
+$ExtractedDir = Get-ChildItem $TmpDir | Select-Object -First 1
+if ($Extras) {
+    & $Pip install --quiet "$($ExtractedDir.FullName)[$Extras]"
 } else {
-    Write-Step "Downloading from GitHub..."
-    $TmpZip = "$env:TEMP\lexora-worker.zip"
-    Invoke-WebRequest "$RepoUrl/archive/refs/heads/main.zip" -OutFile $TmpZip
-    $TmpDir = "$env:TEMP\lexora-worker-src"
-    Expand-Archive $TmpZip -DestinationPath $TmpDir -Force
-    $ExtractedDir = Get-ChildItem $TmpDir | Select-Object -First 1
-    # In the public worker repo pyproject.toml is at the root, not in worker\
-    if ($Extras) {
-        & $Pip install --quiet -e "$($ExtractedDir.FullName)[$Extras]"
-    } else {
-        & $Pip install --quiet -e "$($ExtractedDir.FullName)\worker"
-    }
+    & $Pip install --quiet "$($ExtractedDir.FullName)"
 }
 
 if ($LASTEXITCODE -ne 0) {
