@@ -182,7 +182,7 @@ class WorkerConfig(BaseModel):
     token: str = ""
     node_id: str = ""
     orchestrator_url: str = Field(
-        default_factory=lambda: os.environ.get("LEXORA_ORCHESTRATOR_URL", "http://localhost:3000")
+        default_factory=lambda: os.environ.get("LEXORA_ORCHESTRATOR_URL", "https://api.lexora.network")
     )
     model_cache_dir: str = Field(
         default_factory=lambda: os.environ.get("LEXORA_MODEL_CACHE_DIR", "~/.cache/huggingface/hub")
