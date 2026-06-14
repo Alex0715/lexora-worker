@@ -108,6 +108,20 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-OK "lexora-worker installed"
 
+# -- install CUDA-enabled torch on NVIDIA machines -----------------------------
+# Plain `pip install torch` can resolve to the CPU-only wheel (torch.cuda.is_available()
+# == False even with a working GPU), which breaks vLLM/bitsandbytes/FLUX. Force the
+# CUDA 12.1 wheel when an NVIDIA GPU was detected.
+if ($Extras -like "*image*") {
+    Write-Step "Installing CUDA-enabled PyTorch..."
+    & $Pip install --quiet --force-reinstall "torch>=2.1.0" --index-url https://download.pytorch.org/whl/cu121
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Failed to install CUDA-enabled PyTorch — falling back to CPU build."
+    } else {
+        Write-OK "CUDA-enabled PyTorch installed"
+    }
+}
+
 # -- add to PATH ---------------------------------------------------------------
 $BinPath = "$VenvDir\Scripts"
 $CurrentPath = [Environment]::GetEnvironmentVariable("PATH", "User")
