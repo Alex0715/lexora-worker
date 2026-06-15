@@ -107,6 +107,7 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
             hf_repo="bartowski/Meta-Llama-3.1-8B-Instruct-GGUF",
             format="gguf",
             filename="Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+            quant_repo="meta-llama/Llama-3.1-8B-Instruct",
             label="GGUF Q4_K_M (CUDA, 6–15 GB)",
             backend="cuda",
         ),
