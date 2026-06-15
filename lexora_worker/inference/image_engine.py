@@ -104,6 +104,7 @@ class ImageInferenceEngine:
         self._lock = asyncio.Lock()
         self._variant = self._detect_variant(model_id)
         self._t5_on_cpu = False
+        self._t5_can_gpu = False  # set True in _load_flux_gguf when ≥10 GB free
 
     # ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -164,11 +165,16 @@ class ImageInferenceEngine:
 
     def _load_flux_gguf(self, dtype: object, device: str) -> object:
         """Load FLUX via a GGUF-quantized transformer (Q4_0).
-        Transformer runs on GPU; T5-XXL stays on CPU (too large for most cards).
+        Transformer + CLIP + VAE run on GPU; T5-XXL stays on CPU by default.
+        If ≥10 GB VRAM is free after loading the static pipeline, T5 is moved
+        to GPU temporarily per-job (1-2s encoding vs 50-60s on CPU).
         Used on cards with 7–39 GB VRAM when LEXORA_FLUX_GGUF_REPO is set."""
         import torch
         from diffusers import FluxPipeline, FluxTransformer2DModel, GGUFQuantizationConfig
         from huggingface_hub import hf_hub_download
+
+        # Reduce CUDA memory fragmentation at high resolutions
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
         gguf_repo = os.environ["LEXORA_FLUX_GGUF_REPO"]
         gguf_filename = os.environ.get("LEXORA_FLUX_GGUF_FILENAME", "flux1-schnell-Q4_0.gguf")
@@ -191,14 +197,39 @@ class ImageInferenceEngine:
             low_cpu_mem_usage=True,
         )
 
-        # T5-XXL (~10 GB) stays on CPU; CLIP-L + VAE + transformer go to GPU.
+        # T5-XXL (~9.4 GB) stays on CPU; CLIP-L + VAE + transformer go to GPU.
         pipe.text_encoder_2.to("cpu")
         pipe.text_encoder.to(device)
         pipe.vae.to(device)
         pipe.transformer.to(device)
         self._t5_on_cpu = True
 
-        logger.info("FLUX: GGUF Q4_0 transformer on GPU, T5 on CPU")
+        # VAE tiling + slicing prevent the ~300 MB spike during high-res decode
+        # that causes OOM at 768×768+ on cards with limited headroom.
+        pipe.vae.enable_tiling()
+        pipe.vae.enable_slicing()
+
+        # TF32 matmuls on Ampere — faster with no meaningful quality cost.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+
+        # xformers memory-efficient attention reduces peak activation VRAM.
+        try:
+            pipe.enable_xformers_memory_efficient_attention()
+        except Exception:
+            pass
+
+        torch.cuda.empty_cache()
+
+        # Check if T5 can fit on GPU for fast encoding (~1-2s vs 50-60s on CPU).
+        # T5-XXL in bf16 needs ~9.4 GB; require 10 GB free to leave a buffer.
+        free_vram_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
+        self._t5_can_gpu = free_vram_gb >= 10.0
+        logger.info(
+            "FLUX GGUF loaded — free VRAM: %.1f GB, T5 encoding: %s",
+            free_vram_gb,
+            "GPU (fast)" if self._t5_can_gpu else "CPU (slow, <10 GB free)",
+        )
         return pipe
 
     def _load_flux(self, dtype: object, device: str) -> object:
@@ -528,19 +559,35 @@ class ImageInferenceEngine:
             kwargs["guidance_scale"] = guidance_scale
 
         if self._t5_on_cpu:
-            # T5 (text_encoder_2) lives on CPU while the rest of the pipeline
-            # is on CUDA. The pipeline's default encode_prompt() would run the
-            # CLIP/T5 encoders on self._execution_device (cuda) for both,
-            # causing a cpu/cuda mismatch in text_encoder_2. Encode each text
-            # encoder on its own device, then move the embeddings to CUDA.
+            import torch
             pipe = self._pipe
             prompt_2 = kwargs.pop("prompt")
-            pooled_prompt_embeds = pipe._get_clip_prompt_embeds(
-                prompt=[prompt_2], device="cuda"
-            )
-            prompt_embeds = pipe._get_t5_prompt_embeds(
-                prompt=[prompt_2], device="cpu"
-            ).to("cuda", dtype=pipe.transformer.dtype)
+
+            if self._t5_can_gpu:
+                # Enough free VRAM to encode with T5 on GPU (~1-2s vs 50-60s
+                # on CPU). Move T5 to GPU, encode, then immediately offload it
+                # before the denoising steps so the transformer has full headroom.
+                pipe.text_encoder_2.to("cuda")
+                torch.cuda.empty_cache()
+                try:
+                    pooled_prompt_embeds = pipe._get_clip_prompt_embeds(
+                        prompt=[prompt_2], device="cuda"
+                    )
+                    prompt_embeds = pipe._get_t5_prompt_embeds(
+                        prompt=[prompt_2], device="cuda"
+                    ).to("cuda", dtype=pipe.transformer.dtype)
+                finally:
+                    pipe.text_encoder_2.to("cpu")
+                    torch.cuda.empty_cache()
+            else:
+                # T5 stays on CPU — encode there and move embeddings to CUDA.
+                pooled_prompt_embeds = pipe._get_clip_prompt_embeds(
+                    prompt=[prompt_2], device="cuda"
+                )
+                prompt_embeds = pipe._get_t5_prompt_embeds(
+                    prompt=[prompt_2], device="cpu"
+                ).to("cuda", dtype=pipe.transformer.dtype)
+
             kwargs["prompt"] = None
             kwargs["prompt_embeds"] = prompt_embeds
             kwargs["pooled_prompt_embeds"] = pooled_prompt_embeds
