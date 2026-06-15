@@ -162,24 +162,58 @@ class ImageInferenceEngine:
 
         self._pipe = pipe
 
+    def _load_flux_gguf(self, dtype: object, device: str) -> object:
+        """Load FLUX via a GGUF-quantized transformer (Q4_0).
+        Transformer runs on GPU; T5-XXL stays on CPU (too large for most cards).
+        Used on cards with 7–39 GB VRAM when LEXORA_FLUX_GGUF_REPO is set."""
+        import torch
+        from diffusers import FluxPipeline, FluxTransformer2DModel
+        from diffusers.utils import GGUFQuantizationConfig
+        from huggingface_hub import hf_hub_download
+
+        gguf_repo = os.environ["LEXORA_FLUX_GGUF_REPO"]
+        gguf_filename = os.environ.get("LEXORA_FLUX_GGUF_FILENAME", "flux1-schnell-Q4_0.gguf")
+
+        logger.info("FLUX GGUF: downloading %s / %s", gguf_repo, gguf_filename)
+        gguf_path = hf_hub_download(repo_id=gguf_repo, filename=gguf_filename)
+
+        quantization_config = GGUFQuantizationConfig(compute_dtype=torch.bfloat16)
+        transformer = FluxTransformer2DModel.from_single_file(
+            gguf_path,
+            quantization_config=quantization_config,
+            torch_dtype=torch.bfloat16,
+        )
+
+        pipe = FluxPipeline.from_pretrained(
+            self.model_id,
+            transformer=transformer,
+            torch_dtype=torch.bfloat16,
+            use_safetensors=True,
+            low_cpu_mem_usage=True,
+        )
+
+        # T5-XXL (~10 GB) stays on CPU; CLIP-L + VAE + transformer go to GPU.
+        pipe.text_encoder_2.to("cpu")
+        pipe.text_encoder.to(device)
+        pipe.vae.to(device)
+        pipe.transformer.to(device)
+        self._t5_on_cpu = True
+
+        logger.info("FLUX: GGUF Q4_0 transformer on GPU, T5 on CPU")
+        return pipe
+
     def _load_flux(self, dtype: object, device: str) -> object:
         """
-        Load a FLUX pipeline from pre-quantized checkpoints, memory-mapped to
-        avoid the CPU-bound on-the-fly bitsandbytes quantization pass:
+        Load a FLUX pipeline, choosing the right path based on VRAM and env:
 
-          ≥ 16 GB  →  full bf16 pipeline on GPU (mmap'd safetensors),
-                      no quantized transformer
-          < 12 GB, schnell only → NF4 (bitsandbytes) transformer, quantized
-                      once and cached to local safetensors so every later
-                      boot mmap-loads it directly (no repeated 5-min CPU
-                      quantization pass). CLIP-L + VAE on GPU; T5-XXL stays
-                      on CPU. T5 only runs ONCE for prompt encoding, never
-                      during the per-step denoising loop, so the GIL is
-                      free for the ~4 steps that actually take time →
-                      asyncio heartbeats never starve.
-          6–16 GB  →  pre-quantized NF4 (bitsandbytes) transformer + CLIP-L
-                      + VAE on GPU; T5-XXL stays on CPU (same scheme as above)
-          < 6 GB   →  pre-quantized NF4 transformer + sequential cpu offload
+          LEXORA_FLUX_GGUF_REPO set (7–39 GB)
+                      →  GGUF Q4_0 transformer on GPU, T5-XXL on CPU
+          ≥ 40 GB     →  full bf16 pipeline on GPU (A100 80 GB class)
+          6–40 GB     →  pre-quantized NF4 transformer + CLIP-L/VAE on GPU,
+                         T5-XXL on CPU
+          < 12 GB, schnell only
+                      →  NF4 transformer + model CPU offload + VAE tiling
+          < 6 GB      →  NF4 transformer + sequential cpu offload
         """
         import torch
         from diffusers import FluxPipeline, FluxTransformer2DModel
@@ -190,14 +224,16 @@ class ImageInferenceEngine:
         if vram_gb == 0:
             raise RuntimeError(
                 "No CUDA GPU is visible to PyTorch (torch.cuda.is_available() "
-                "is False), so FLUX cannot be loaded — bitsandbytes/NF4 require "
-                "a CUDA device. This usually means your NVIDIA driver is too "
-                "old for the installed PyTorch/CUDA build. Update your GPU "
-                "driver from https://www.nvidia.com/Download/index.aspx and "
-                "restart the worker."
+                "is False), so FLUX cannot be loaded. This usually means your "
+                "NVIDIA driver is too old for the installed PyTorch/CUDA build. "
+                "Update your GPU driver from https://www.nvidia.com/Download/index.aspx"
             )
 
-        if vram_gb >= 16:
+        # GGUF path — model_resolver sets this when the GGUF variant was chosen
+        if os.environ.get("LEXORA_FLUX_GGUF_REPO"):
+            return self._load_flux_gguf(dtype, device)
+
+        if vram_gb >= 40:
             _require_safetensors(self.model_id)
             pipe = FluxPipeline.from_pretrained(
                 self.model_id,

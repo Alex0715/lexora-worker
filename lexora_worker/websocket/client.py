@@ -190,7 +190,7 @@ class WorkerSocketClient:
             "Registered — GPU: %s | VRAM: %.1f GB | Models: %s",
             profile.gpu_model,
             profile.vram,
-            profile.loaded_models,
+            loaded,
         )
 
         if self._heartbeat_task is None or self._heartbeat_task.done():

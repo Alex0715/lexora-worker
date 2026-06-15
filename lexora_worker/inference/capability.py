@@ -78,7 +78,7 @@ def get_capable_models(gpu_model: str, vram_gb: float) -> list[str]:
         ]
     if vram_gb >= 24:
         return [TEXT_3B_CUDA, TEXT_8B_CUDA, IMG_SCHNELL, IMG_DEV, VID_WAN]
-    if vram_gb >= 12:
+    if vram_gb >= 16:
         return [TEXT_3B_CUDA, TEXT_8B_CUDA, IMG_SCHNELL]
     if vram_gb >= 8:
         return [TEXT_3B_CUDA, IMG_SCHNELL]

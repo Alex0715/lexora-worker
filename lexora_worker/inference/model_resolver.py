@@ -89,10 +89,10 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
     # ── Text: Llama 3.1 8B ───────────────────────────────────────────────────
     "llama-3.1-8b": [
         ModelVariant(
-            min_vram_gb=16.0,
+            min_vram_gb=18.0,
             hf_repo="meta-llama/Llama-3.1-8B-Instruct",
             format="safetensors",
-            label="fp16 (CUDA, ≥16 GB)",
+            label="fp16 (CUDA, ≥18 GB)",
             backend="cuda",
         ),
         ModelVariant(
@@ -114,10 +114,10 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
     # ── Image: FLUX.1-schnell ─────────────────────────────────────────────────
     "flux.1-schnell": [
         ModelVariant(
-            min_vram_gb=16.0,
+            min_vram_gb=40.0,
             hf_repo="black-forest-labs/FLUX.1-schnell",
             format="safetensors",
-            label="full bf16 pipeline",
+            label="full bf16 pipeline (≥40 GB)",
         ),
         ModelVariant(
             min_vram_gb=7.0,
@@ -131,10 +131,10 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
     # ── Image: FLUX.1-dev ────────────────────────────────────────────────────
     "flux.1-dev": [
         ModelVariant(
-            min_vram_gb=24.0,
+            min_vram_gb=60.0,
             hf_repo="black-forest-labs/FLUX.1-dev",
             format="safetensors",
-            label="full bf16 pipeline",
+            label="full bf16 pipeline (≥60 GB)",
         ),
         ModelVariant(
             min_vram_gb=12.0,
