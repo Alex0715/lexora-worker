@@ -155,7 +155,7 @@ def info() -> None:
 def start(
     model: Optional[list[str]] = typer.Option(None, "--model", "-m", help="HuggingFace model ID (auto-detected if omitted). Repeat to preload multiple models."),
     max_concurrency: int = typer.Option(
-        1, "--max-concurrency", "-c", min=1, max=16, help="Max parallel jobs"
+        3, "--max-concurrency", "-c", min=1, max=16, help="Max parallel jobs"
     ),
     max_model_len: int = typer.Option(
         4096, "--max-model-len", help="Max sequence length for vLLM"
