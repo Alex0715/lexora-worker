@@ -168,6 +168,7 @@ class InferenceEngine:
                 dtype="auto",
                 gpu_memory_utilization=gpu_util,
                 trust_remote_code=True,
+                enforce_eager=True,  # skip CUDA graph capture — GGUF on V1 engine OOMs during graph compilation
             )
         else:
             args = AsyncEngineArgs(
