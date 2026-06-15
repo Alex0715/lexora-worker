@@ -227,7 +227,7 @@ class ImageInferenceEngine:
             self._t5_on_cpu = False
             self._t5_can_gpu = False
             logger.info("FLUX GGUF: T5 on GPU bf16 (%.1f GB free)", free_vram_gb)
-        elif free_vram_gb >= 5.0:
+        elif free_vram_gb >= 4.7:
             try:
                 from transformers import BitsAndBytesConfig, T5EncoderModel
                 t5_int8 = T5EncoderModel.from_pretrained(
