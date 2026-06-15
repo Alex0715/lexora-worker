@@ -167,8 +167,7 @@ class ImageInferenceEngine:
         Transformer runs on GPU; T5-XXL stays on CPU (too large for most cards).
         Used on cards with 7–39 GB VRAM when LEXORA_FLUX_GGUF_REPO is set."""
         import torch
-        from diffusers import FluxPipeline, FluxTransformer2DModel
-        from diffusers.utils import GGUFQuantizationConfig
+        from diffusers import FluxPipeline, FluxTransformer2DModel, GGUFQuantizationConfig
         from huggingface_hub import hf_hub_download
 
         gguf_repo = os.environ["LEXORA_FLUX_GGUF_REPO"]
