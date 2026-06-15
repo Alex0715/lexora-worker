@@ -234,7 +234,7 @@ class ImageInferenceEngine:
                     self.model_id,
                     subfolder="text_encoder_2",
                     quantization_config=BitsAndBytesConfig(load_in_8bit=True),
-                    torch_dtype=torch.float16,
+                    torch_dtype=torch.bfloat16,
                 )
                 del pipe.text_encoder_2
                 torch.cuda.empty_cache()
