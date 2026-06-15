@@ -93,6 +93,7 @@ class InferenceEngine:
 
         # vLLM
         self._engine: Any | None = None
+        self._vllm_tokenizer: Any | None = None   # for apply_chat_template
         # HuggingFace
         self._hf_model: Any | None = None
         self._hf_tokenizer: Any | None = None
@@ -181,6 +182,19 @@ class InferenceEngine:
         self._engine = await loop.run_in_executor(
             None, AsyncLLMEngine.from_engine_args, args
         )
+
+        # Load the HF tokenizer separately for chat template formatting.
+        # vLLM receives a raw string prompt, so we need apply_chat_template
+        # to produce the correct model-specific format (Llama 3, Mistral, etc.).
+        tokenizer_name = os.environ.get("LEXORA_TEXT_GGUF_TOKENIZER", self.model_id)
+        try:
+            from transformers import AutoTokenizer
+            self._vllm_tokenizer = await loop.run_in_executor(
+                None,
+                lambda: AutoTokenizer.from_pretrained(tokenizer_name),
+            )
+        except Exception as exc:
+            logger.warning("Could not load tokenizer %s for chat template: %s", tokenizer_name, exc)
 
     async def _load_hf(self) -> None:
         import torch
@@ -311,11 +325,11 @@ class InferenceEngine:
     ) -> AsyncGenerator[GenerationChunk, None]:
         assert self._engine is not None
 
-        prompt = self._build_prompt(messages, None)
+        prompt = self._build_prompt(messages, self._vllm_tokenizer)
         sampling = SamplingParams(
             temperature=temperature,
             max_tokens=max_tokens,
-            stop=["</s>", "<|im_end|>", "<|eot_id|>"],
+            stop=["</s>", "<|im_end|>", "<|eot_id|>", "<|end_of_text|>"],
         )
 
         start = time.monotonic()
