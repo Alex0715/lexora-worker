@@ -20,53 +20,39 @@ Run this on your machine to serve inference jobs and earn rewards.
 
 ## Install
 
-**macOS / Linux**
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/Alex0715/lexora-worker/main/install.sh)"
-```
-
-**Windows (PowerShell)**
-```powershell
-powershell -ExecutionPolicy Bypass -Command "& { iwr -useb https://raw.githubusercontent.com/Alex0715/lexora-worker/main/install.ps1 | iex }"
-```
-
-The installer detects your GPU, installs the right backend (MLX / vLLM / Transformers), and launches the setup wizard automatically.
-
----
-
-## Manual Install
+**1. Clone the repo**
 
 ```bash
-git clone https://github.com/Alex0715/lexora-worker
-cd lexora-worker
+git clone https://github.com/Alex0715/AI_Inference
+cd AI_Inference
+```
 
-python3 -m venv ~/.lexora-worker/venv
-source ~/.lexora-worker/venv/bin/activate
+**2. Install the worker**
 
+```bash
 # macOS / Apple Silicon
-pip install -e ".[mac]"
+pip install -e "./worker[mac]"
 
 # Linux / Windows — NVIDIA GPU
-pip install -e ".[inference,image]"
+pip install -e "./worker[inference,image]"
 
 # CPU-only
-pip install -e .
+pip install -e ./worker
 ```
 
----
+**3. Log in with your worker token**
 
-## Setup
+Get a token at [lexora.network/provider/nodes](https://lexora.network/provider/nodes), then:
 
 ```bash
-lexora-worker setup
+lexora-worker login --token <your-token>
 ```
 
-The wizard will:
-1. Detect your GPU and VRAM
-2. Ask for your orchestrator URL (`https://api.lexora.network`)
-3. Ask for your worker token (get one at [lexora.network/provider/nodes](https://lexora.network/provider/nodes))
-4. Recommend the best model for your hardware
-5. Install as a background service (launchd on macOS, systemd on Linux)
+**4. Start the worker**
+
+```bash
+lexora-worker start
+```
 
 ---
 

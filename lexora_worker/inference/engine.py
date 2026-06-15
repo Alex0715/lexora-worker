@@ -120,8 +120,9 @@ class InferenceEngine:
             else:
                 raise RuntimeError(
                     "No inference backend available. "
-                    "On Mac: pip install mlx-lm. "
-                    "On Linux/Windows: pip install -e ./worker[inference]"
+                    "On Mac: pip install -e './worker[mac]'  "
+                    "On Linux/Windows with NVIDIA GPU: pip install -e './worker[inference]'  "
+                    "On Linux/Windows CPU-only: pip install -e './worker[transformers]'"
                 )
 
             self._loaded = True
