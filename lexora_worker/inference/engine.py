@@ -155,6 +155,8 @@ class InferenceEngine:
 
         if gguf_repo and gguf_filename:
             from huggingface_hub import hf_hub_download
+            # FlashInfer (TVM) is incompatible with GGUF models — switch to PyTorch SDPA.
+            os.environ["VLLM_ATTENTION_BACKEND"] = "TORCH_SDPA"
             logger.info("Downloading GGUF: %s / %s", gguf_repo, gguf_filename)
             loop = asyncio.get_event_loop()
             gguf_path = await loop.run_in_executor(
