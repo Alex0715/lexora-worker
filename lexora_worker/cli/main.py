@@ -241,8 +241,34 @@ async def _worker_main(
     try:
         await model_manager.initialize(resolved_ids[0], total_vram=profile.vram)
     except Exception as exc:
-        console.print(f"[red]Failed to load model: {exc}[/red]")
-        raise typer.Exit(1) from exc
+        err_str = str(exc)
+        if any(k in err_str for k in ("gated", "401", "access to it and be authenticated")):
+            from rich.prompt import Prompt
+            console.print(
+                Panel(
+                    f"[yellow]This model requires a HuggingFace access token.[/yellow]\n\n"
+                    f"1. Accept the model licence at [cyan]https://huggingface.co/{resolved_ids[0]}[/cyan]\n"
+                    f"2. Generate a token at [cyan]https://huggingface.co/settings/tokens[/cyan]",
+                    title="[bold yellow]HuggingFace Token Required",
+                    border_style="yellow",
+                )
+            )
+            hf_token = Prompt.ask("[cyan]Paste your HuggingFace token[/cyan]", password=True)
+            if not hf_token.strip():
+                console.print("[red]No token provided. Exiting.[/red]")
+                raise typer.Exit(1) from exc
+            cfg.hf_token = hf_token.strip()
+            save_config(cfg)
+            _apply_hf_token(hf_token.strip())
+            console.print("[dim]Retrying model load...[/dim]")
+            try:
+                await model_manager.initialize(resolved_ids[0], total_vram=profile.vram)
+            except Exception as exc2:
+                console.print(f"[red]Failed to load model: {exc2}[/red]")
+                raise typer.Exit(1) from exc2
+        else:
+            console.print(f"[red]Failed to load model: {exc}[/red]")
+            raise typer.Exit(1) from exc
     console.print(f"[green]Model loaded[/green] ✓")
 
     for extra_id in resolved_ids[1:]:
