@@ -70,10 +70,10 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
             backend="mlx",
         ),
         ModelVariant(
-            min_vram_gb=9.0,
+            min_vram_gb=16.0,
             hf_repo="meta-llama/Llama-3.2-3B-Instruct",
             format="safetensors",
-            label="bf16 (CUDA, ≥9 GB)",
+            label="bf16 (CUDA, ≥16 GB solo)",
             backend="cuda",
         ),
         ModelVariant(
