@@ -200,8 +200,8 @@ async def _worker_main(
 ) -> None:
     # Deferred imports — only loaded when `start` is actually invoked
     from lexora_worker.hardware.profiler import build_hardware_profile
-    from lexora_worker.inference.model_manager import ModelManager
-    from lexora_worker.inference.model_resolver import resolve_model
+    from lexora_worker.inference.model_manager import ModelManager, _is_image_model, _runtime_vram_cost
+    from lexora_worker.inference.model_resolver import resolve_model, cheapest_vram_for
     from lexora_worker.job.manager import JobManager
     from lexora_worker.websocket.client import WorkerSocketClient
 
@@ -211,20 +211,43 @@ async def _worker_main(
 
     model_ids = [model_id] if isinstance(model_id, str) else list(model_id)
 
-    # Resolve each requested alias/repo to the hardware variant that fits this
-    # node's VRAM *before* any weights are downloaded or loaded. A ValueError
-    # here means no variant fits — exit cleanly instead of risking an OOM.
+    # Two-pass resolution: each model's available VRAM is reduced by the
+    # cheapest-possible cost of every other co-loaded model. This ensures
+    # the resolver picks a smaller quantized variant (e.g. GGUF) when
+    # there isn't enough room for the full-precision version alongside
+    # its siblings — instead of greedily picking bf16 and OOM-ing later.
+    cheapest = {mid: cheapest_vram_for(mid) for mid in model_ids}
+
     resolved_ids: list[str] = []
     resolved_labels: list[str] = []
+    resolved_variants: list = []
     for mid in model_ids:
+        other_reserved = sum(v for k, v in cheapest.items() if k != mid)
+        available = max(0.0, profile.vram - other_reserved)
         try:
-            resolved = resolve_model(mid, profile.vram)
+            resolved = resolve_model(mid, available)
         except ValueError as exc:
             console.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
         resolved.apply_env()
         resolved_ids.append(resolved.model_id)
         resolved_labels.append(f"{resolved.model_id} [dim]({resolved.variant.label})[/dim]")
+        resolved_variants.append(resolved)
+
+    # If image models are co-loaded, cap vLLM's GPU memory fraction so it
+    # doesn't pre-allocate 90% of VRAM for KV cache and leave nothing for FLUX.
+    image_vram_budget = sum(
+        _runtime_vram_cost(rid)
+        for rid in resolved_ids
+        if _is_image_model(rid)
+    )
+    if image_vram_budget > 0 and profile.vram > 0:
+        vllm_util = max(0.25, (profile.vram - image_vram_budget) / profile.vram)
+        os.environ["LEXORA_VLLM_GPU_UTIL"] = f"{vllm_util:.3f}"
+        logger.info(
+            "Co-loading image model (%.1f GB budget) — capping vLLM GPU util to %.0f%%",
+            image_vram_budget, vllm_util * 100,
+        )
 
     console.print(
         Panel.fit(

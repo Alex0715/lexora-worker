@@ -70,10 +70,10 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
             backend="mlx",
         ),
         ModelVariant(
-            min_vram_gb=4.0,
+            min_vram_gb=9.0,
             hf_repo="meta-llama/Llama-3.2-3B-Instruct",
             format="safetensors",
-            label="bf16 (CUDA, ≥4 GB)",
+            label="bf16 (CUDA, ≥9 GB)",
             backend="cuda",
         ),
         ModelVariant(
@@ -179,6 +179,24 @@ def _active_backend() -> str:
     except ImportError:
         pass
     return "cpu"
+
+
+def cheapest_vram_for(alias: str) -> float:
+    """Return the minimum VRAM (GB) of the cheapest compatible variant.
+    Used to reserve budget for co-loaded models before resolving each one."""
+    import platform as _platform
+    key = normalize_alias(alias)
+    variants = MODEL_MANIFEST.get(key, [])
+    if not variants:
+        return 8.0
+    is_mac = _platform.system() == "Darwin"
+    backend = _active_backend()
+    platform_variants = [
+        v for v in variants
+        if (v.backend != "mlx" or is_mac) and (v.backend != "cuda" or not is_mac)
+    ] or list(variants)
+    compatible = [v for v in platform_variants if v.backend is None or v.backend == backend] or platform_variants
+    return min(v.min_vram_gb for v in compatible)
 
 
 def resolve_model(alias: str, available_vram_gb: float) -> ResolvedModel:

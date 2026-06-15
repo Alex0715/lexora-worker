@@ -144,6 +144,10 @@ class InferenceEngine:
         # gets a fresh interpreter.
         os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
+        # When co-loading with image models, _worker_main caps this to leave
+        # enough VRAM for the image pipeline. Default 0.90 when running alone.
+        gpu_util = float(os.environ.get("LEXORA_VLLM_GPU_UTIL", "0.90"))
+
         gguf_repo = os.environ.get("LEXORA_TEXT_GGUF_REPO")
         gguf_filename = os.environ.get("LEXORA_TEXT_GGUF_FILENAME")
         gguf_tokenizer = os.environ.get("LEXORA_TEXT_GGUF_TOKENIZER", self.model_id)
@@ -161,7 +165,7 @@ class InferenceEngine:
                 tokenizer=gguf_tokenizer,
                 max_model_len=self.max_model_len,
                 dtype="auto",
-                gpu_memory_utilization=0.90,
+                gpu_memory_utilization=gpu_util,
                 trust_remote_code=True,
             )
         else:
@@ -169,7 +173,7 @@ class InferenceEngine:
                 model=self.model_id,
                 max_model_len=self.max_model_len,
                 dtype="auto",
-                gpu_memory_utilization=0.90,
+                gpu_memory_utilization=gpu_util,
                 trust_remote_code=True,
             )
 
