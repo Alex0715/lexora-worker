@@ -30,15 +30,25 @@ class ResolvedModel:
         return self.variant.hf_repo
 
     def apply_env(self) -> None:
-        """Set the LEXORA_* overrides consumed by ImageInferenceEngine's
-        quantized-component loaders, so the chosen variant is what actually
-        gets downloaded and mmap'd."""
+        """Set LEXORA_* env vars consumed by inference engines so the chosen
+        variant is what actually gets downloaded and loaded."""
         variant = self.variant
+        is_image = any(k in self.alias for k in ("flux", "sdxl", "stable-diffusion"))
+
         if variant.format == "gguf":
-            if variant.quant_repo:
-                os.environ["LEXORA_FLUX_GGUF_REPO"] = variant.quant_repo
-            if variant.filename:
-                os.environ["LEXORA_FLUX_GGUF_FILENAME"] = variant.filename
+            if is_image:
+                if variant.quant_repo:
+                    os.environ["LEXORA_FLUX_GGUF_REPO"] = variant.quant_repo
+                if variant.filename:
+                    os.environ["LEXORA_FLUX_GGUF_FILENAME"] = variant.filename
+            else:
+                # Text GGUF: store repo + filename for InferenceEngine._load_vllm
+                os.environ["LEXORA_TEXT_GGUF_REPO"] = variant.hf_repo
+                if variant.filename:
+                    os.environ["LEXORA_TEXT_GGUF_FILENAME"] = variant.filename
+                # quant_repo holds the original model repo used as tokenizer source
+                if variant.quant_repo:
+                    os.environ["LEXORA_TEXT_GGUF_TOKENIZER"] = variant.quant_repo
         elif variant.format == "nf4":
             if variant.quant_repo:
                 os.environ["LEXORA_FLUX_NF4_REPO"] = variant.quant_repo
@@ -63,7 +73,16 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
             min_vram_gb=4.0,
             hf_repo="meta-llama/Llama-3.2-3B-Instruct",
             format="safetensors",
-            label="bf16 (CUDA)",
+            label="bf16 (CUDA, ≥4 GB)",
+            backend="cuda",
+        ),
+        ModelVariant(
+            min_vram_gb=2.0,
+            hf_repo="bartowski/Llama-3.2-3B-Instruct-GGUF",
+            format="gguf",
+            filename="Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+            quant_repo="meta-llama/Llama-3.2-3B-Instruct",
+            label="GGUF Q4_K_M (CUDA, 2 GB)",
             backend="cuda",
         ),
     ],

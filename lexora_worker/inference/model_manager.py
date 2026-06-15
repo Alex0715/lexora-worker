@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 # Runtime execution overhead added on top of static model weight cost.
 # Prevents OOM when concurrent text + image inference activations accumulate.
-_TEXT_RUNTIME_BUFFER = 1.5   # GB — KV cache + activation tensors
-_IMAGE_RUNTIME_BUFFER = 4.5  # GB — denoising intermediate tensors at 1024px
+_TEXT_RUNTIME_BUFFER = 1.5        # GB — KV cache + activation tensors
+_IMAGE_RUNTIME_BUFFER = 4.5       # GB — denoising intermediate tensors at 1024px
+_IMAGE_RUNTIME_BUFFER_GGUF = 2.5  # GB — GGUF variant: T5 encoder runs on CPU
 
 
 def _is_image_model(model_id: str) -> bool:
@@ -34,8 +35,18 @@ def _is_video_model(model_id: str) -> bool:
 
 def _runtime_vram_cost(model_id: str) -> float:
     """Static weight cost + execution buffer used for all internal VRAM planning."""
+    import os
     base = MODEL_VRAM_COST.get(model_id, 8.0)
-    buffer = _IMAGE_RUNTIME_BUFFER if _is_image_model(model_id) else _TEXT_RUNTIME_BUFFER
+    if _is_image_model(model_id):
+        # FLUX GGUF variant offloads the T5 encoder to CPU, so GPU intermediate
+        # tensors are smaller — use the reduced buffer.
+        buffer = (
+            _IMAGE_RUNTIME_BUFFER_GGUF
+            if os.environ.get("LEXORA_FLUX_GGUF_REPO")
+            else _IMAGE_RUNTIME_BUFFER
+        )
+    else:
+        buffer = _TEXT_RUNTIME_BUFFER
     return base + buffer
 
 

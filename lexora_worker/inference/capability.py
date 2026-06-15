@@ -18,8 +18,10 @@ VID_SVD = "stabilityai/stable-video-diffusion-img2vid-xt"
 MODEL_VRAM_COST: dict[str, float] = {
     TEXT_3B: 3.0,
     TEXT_3B_CUDA: 3.0,
+    "bartowski/Llama-3.2-3B-Instruct-GGUF": 2.0,   # Q4_K_M
     TEXT_8B: 6.0,
     TEXT_8B_CUDA: 6.0,
+    "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF": 5.0,  # Q4_K_M
     TEXT_70B: 42.0,
     TEXT_70B_CUDA: 42.0,
     IMG_SCHNELL: 7.0,

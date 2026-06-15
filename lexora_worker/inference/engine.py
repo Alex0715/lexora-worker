@@ -139,21 +139,40 @@ class InferenceEngine:
         self._mlx_model, self._mlx_tokenizer = await loop.run_in_executor(None, _load)
 
     async def _load_vllm(self) -> None:
-        # The hardware profiler (and other earlier startup code) calls
-        # torch.cuda.* in this process, initializing a CUDA context. vLLM's
-        # default "fork" multiprocessing start method can't re-init CUDA in
-        # the forked EngineCore subprocess ("Cannot re-initialize CUDA in
-        # forked subprocess"). Force "spawn" so the subprocess gets a fresh
-        # interpreter instead of a fork of this CUDA-initialized one.
+        # vLLM's default "fork" multiprocessing start method can't re-init CUDA
+        # in the forked EngineCore subprocess. Force "spawn" so the subprocess
+        # gets a fresh interpreter.
         os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
 
-        args = AsyncEngineArgs(
-            model=self.model_id,
-            max_model_len=self.max_model_len,
-            dtype="auto",
-            gpu_memory_utilization=0.90,
-            trust_remote_code=True,
-        )
+        gguf_repo = os.environ.get("LEXORA_TEXT_GGUF_REPO")
+        gguf_filename = os.environ.get("LEXORA_TEXT_GGUF_FILENAME")
+        gguf_tokenizer = os.environ.get("LEXORA_TEXT_GGUF_TOKENIZER", self.model_id)
+
+        if gguf_repo and gguf_filename:
+            from huggingface_hub import hf_hub_download
+            logger.info("Downloading GGUF: %s / %s", gguf_repo, gguf_filename)
+            loop = asyncio.get_event_loop()
+            gguf_path = await loop.run_in_executor(
+                None,
+                lambda: hf_hub_download(repo_id=gguf_repo, filename=gguf_filename),
+            )
+            args = AsyncEngineArgs(
+                model=gguf_path,
+                tokenizer=gguf_tokenizer,
+                max_model_len=self.max_model_len,
+                dtype="auto",
+                gpu_memory_utilization=0.90,
+                trust_remote_code=True,
+            )
+        else:
+            args = AsyncEngineArgs(
+                model=self.model_id,
+                max_model_len=self.max_model_len,
+                dtype="auto",
+                gpu_memory_utilization=0.90,
+                trust_remote_code=True,
+            )
+
         loop = asyncio.get_event_loop()
         self._engine = await loop.run_in_executor(
             None, AsyncLLMEngine.from_engine_args, args
