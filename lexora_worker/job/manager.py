@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -51,6 +52,10 @@ class JobManager:
         self._active: dict[str, ActiveJob] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._lock = asyncio.Lock()
+        # Keeps the last 2000 job IDs (active + recently completed) so that
+        # socket.io retransmits and orchestrator double-dispatches are dropped
+        # before they start a second inference run for the same job.
+        self._seen_job_ids: deque[str] = deque(maxlen=2000)
 
     @property
     def active_count(self) -> int:
@@ -72,6 +77,9 @@ class JobManager:
     async def dispatch(self, payload: JobDispatchPayload) -> None:
         """Entry point called by the WebSocket layer on job:dispatch."""
         async with self._lock:
+            if payload.jobId in self._seen_job_ids:
+                logger.warning("Duplicate text dispatch for job %s — dropped", payload.jobId)
+                return
             if len(self._active) >= self._max_concurrency:
                 await self._emit(
                     "worker:jobRejected",
@@ -112,6 +120,7 @@ class JobManager:
                 start_time=time.monotonic(),
             )
             self._active[payload.jobId] = job
+            self._seen_job_ids.append(payload.jobId)
 
         await self._emit(
             "worker:jobAccepted",
@@ -141,6 +150,9 @@ class JobManager:
         orchestrator's load-balancing decisions are correct.
         """
         async with self._lock:
+            if payload.jobId in self._seen_job_ids:
+                logger.warning("Duplicate image dispatch for job %s — dropped", payload.jobId)
+                return
             if len(self._active) >= self._max_concurrency:
                 await self._emit(
                     "worker:jobRejected",
@@ -181,6 +193,7 @@ class JobManager:
                 start_time=time.monotonic(),
             )
             self._active[payload.jobId] = job
+            self._seen_job_ids.append(payload.jobId)
 
         await self._emit(
             "worker:jobAccepted",
