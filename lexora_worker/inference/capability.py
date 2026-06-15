@@ -24,7 +24,7 @@ MODEL_VRAM_COST: dict[str, float] = {
     "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF": 5.0,  # Q4_K_M
     TEXT_70B: 42.0,
     TEXT_70B_CUDA: 42.0,
-    IMG_SCHNELL: 7.0,
+    IMG_SCHNELL: 9.4,   # transformer 4.5 + CLIP/VAE 0.7 + T5 int8 4.7 (rounds up)
     IMG_DEV: 20.0,
     VID_WAN: 16.0,
     VID_SVD: 14.0,

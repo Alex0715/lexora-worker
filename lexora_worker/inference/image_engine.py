@@ -197,15 +197,12 @@ class ImageInferenceEngine:
             low_cpu_mem_usage=True,
         )
 
-        # T5-XXL (~9.4 GB) stays on CPU; CLIP-L + VAE + transformer go to GPU.
-        pipe.text_encoder_2.to("cpu")
+        # CLIP-L + VAE + transformer go to GPU.
         pipe.text_encoder.to(device)
         pipe.vae.to(device)
         pipe.transformer.to(device)
-        self._t5_on_cpu = True
 
-        # VAE tiling + slicing prevent the ~300 MB spike during high-res decode
-        # that causes OOM at 768×768+ on cards with limited headroom.
+        # VAE tiling + slicing prevent the ~300 MB spike during high-res decode.
         pipe.vae.enable_tiling()
         pipe.vae.enable_slicing()
 
@@ -213,23 +210,52 @@ class ImageInferenceEngine:
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-        # xformers memory-efficient attention reduces peak activation VRAM.
         try:
             pipe.enable_xformers_memory_efficient_attention()
         except Exception:
             pass
 
         torch.cuda.empty_cache()
-
-        # Check if T5 can fit on GPU for fast encoding (~1-2s vs 50-60s on CPU).
-        # T5-XXL in bf16 needs ~9.4 GB; require 10 GB free to leave a buffer.
         free_vram_gb = torch.cuda.mem_get_info()[0] / (1024 ** 3)
-        self._t5_can_gpu = free_vram_gb >= 10.0
-        logger.info(
-            "FLUX GGUF loaded — free VRAM: %.1f GB, T5 encoding: %s",
-            free_vram_gb,
-            "GPU (fast)" if self._t5_can_gpu else "CPU (slow, <10 GB free)",
-        )
+
+        # T5-XXL placement — three tiers based on free VRAM after the static pipeline:
+        #   ≥ 10 GB free  → bf16 on GPU permanently   (~9.4 GB, encoding ~1s)
+        #   ≥  5 GB free  → int8 on GPU permanently   (~4.7 GB, encoding ~1s)
+        #   <  5 GB free  → stays on CPU              (encoding ~60s, unavoidable)
+        if free_vram_gb >= 10.0:
+            pipe.text_encoder_2.to(device)
+            self._t5_on_cpu = False
+            self._t5_can_gpu = False
+            logger.info("FLUX GGUF: T5 on GPU bf16 (%.1f GB free)", free_vram_gb)
+        elif free_vram_gb >= 5.0:
+            try:
+                from transformers import BitsAndBytesConfig, T5EncoderModel
+                t5_int8 = T5EncoderModel.from_pretrained(
+                    self.model_id,
+                    subfolder="text_encoder_2",
+                    quantization_config=BitsAndBytesConfig(load_in_8bit=True),
+                    torch_dtype=torch.float16,
+                )
+                del pipe.text_encoder_2
+                torch.cuda.empty_cache()
+                pipe.text_encoder_2 = t5_int8
+                self._t5_on_cpu = False
+                self._t5_can_gpu = False
+                logger.info("FLUX GGUF: T5 on GPU int8 (~4.7 GB, %.1f GB was free)", free_vram_gb)
+            except Exception as exc:
+                logger.warning("FLUX GGUF: T5 int8 failed (%s) — CPU fallback", exc)
+                pipe.text_encoder_2.to("cpu")
+                self._t5_on_cpu = True
+                self._t5_can_gpu = False
+        else:
+            pipe.text_encoder_2.to("cpu")
+            self._t5_on_cpu = True
+            self._t5_can_gpu = False
+            logger.warning(
+                "FLUX GGUF: T5 on CPU (only %.1f GB free — image encoding will take ~60s). "
+                "Run without co-loaded text models to get GPU-speed encoding.",
+                free_vram_gb,
+            )
         return pipe
 
     def _load_flux(self, dtype: object, device: str) -> object:
