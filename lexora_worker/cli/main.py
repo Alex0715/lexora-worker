@@ -367,13 +367,14 @@ def _recommend_models(gpu_model: str, vram_gb: float) -> list[tuple[str, str]]:
             opts.append(_MODEL_RECOMMENDATIONS["mac_large"])
         return opts
 
-    opts = [_MODEL_RECOMMENDATIONS["gpu_small"]]
-    if vram_gb >= 8:
-        opts.append(_MODEL_RECOMMENDATIONS["gpu_image"])
-    if vram_gb >= 12:
-        opts.append(_MODEL_RECOMMENDATIONS["gpu_medium"])
+    opts: list[tuple[str, str]] = []
     if vram_gb >= 40:
         opts.append(_MODEL_RECOMMENDATIONS["gpu_large"])
+    if vram_gb >= 12:
+        opts.append(_MODEL_RECOMMENDATIONS["gpu_medium"])
+    if vram_gb >= 8:
+        opts.append(_MODEL_RECOMMENDATIONS["gpu_image"])
+    opts.append(_MODEL_RECOMMENDATIONS["gpu_small"])
     return opts
 
 
