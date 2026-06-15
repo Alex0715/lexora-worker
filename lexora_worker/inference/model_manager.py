@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Prevents OOM when concurrent text + image inference activations accumulate.
 _TEXT_RUNTIME_BUFFER = 1.5        # GB — KV cache + activation tensors
 _IMAGE_RUNTIME_BUFFER = 4.5       # GB — denoising intermediate tensors at 1024px
-_IMAGE_RUNTIME_BUFFER_GGUF = 1.5  # GB — T5 int8 now in base cost; buffer covers denoising activations
+_IMAGE_RUNTIME_BUFFER_GGUF = 2.0  # GB — T5 is on CPU when co-loading; buffer covers denoising activations
 
 
 def _is_image_model(model_id: str) -> bool:
