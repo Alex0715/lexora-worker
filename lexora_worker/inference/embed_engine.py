@@ -39,7 +39,7 @@ class EmbedEngine:
         logger.info("BGE-M3 embed engine loaded (CPU)")
 
     def _load_sync(self) -> Any:
-        kwargs: dict[str, Any] = {"device": "cpu"}
+        kwargs: dict[str, Any] = {"device": "cpu", "trust_remote_code": True}
         if self._model_cache_dir:
             kwargs["cache_folder"] = self._model_cache_dir
         return SentenceTransformer(self.MODEL_ID, **kwargs)
