@@ -23,6 +23,7 @@ from lexora_worker.models import (
     JobCancelPayload,
     JobDispatchPayload,
     LoadModelPayload,
+    RagIngestPayload,
     UpdateConfigPayload,
     WorkerHeartbeatPayload,
     WorkerModelLoadErrorPayload,
@@ -143,6 +144,27 @@ class WorkerSocketClient:
             except Exception as exc:
                 logger.exception("node:loadModel handler error: %s", exc)
 
+        @sio.on("rag:ingest", namespace="/workers")
+        async def on_rag_ingest(data: dict[str, Any]) -> None:
+            try:
+                payload = RagIngestPayload(**data)
+                asyncio.create_task(
+                    self._job_manager.dispatch_rag_ingest(payload),
+                    name=f"rag-{payload.jobId}",
+                )
+            except Exception as exc:
+                logger.error("rag:ingest handler error: %s", exc)
+
+        @sio.on("rag:embedQuery", namespace="/workers")
+        async def on_embed_query(data: dict[str, Any]) -> dict[str, Any]:
+            try:
+                text = str(data.get("text", ""))
+                embedding = await self._job_manager.embed_query(text)
+                return {"embedding": embedding}
+            except Exception as exc:
+                logger.error("rag:embedQuery handler error: %s", exc)
+                return {"error": str(exc)}
+
         @sio.on("node:evicted", namespace="/workers")
         async def on_evicted(data: dict[str, Any]) -> None:
             logger.warning("Evicted by orchestrator: %s", data)
@@ -179,6 +201,7 @@ class WorkerSocketClient:
                 "ram": profile.ram,
                 "cpu": profile.cpu,
                 "loadedModels": loaded,
+                "embeddings": self._job_manager._model_manager.embed_models,
                 "networkSpeed": profile.network_speed,
                 "maxConcurrentJobs": self._job_manager._max_concurrency,
             },
@@ -247,7 +270,7 @@ class WorkerSocketClient:
                 logger.warning("Heartbeat failed: %s", exc)
 
     # Events whose results must not be lost if the socket is temporarily down
-    _CRITICAL_EVENTS = frozenset({"worker:imageCompleted", "worker:imageError"})
+    _CRITICAL_EVENTS = frozenset({"worker:imageCompleted", "worker:imageError", "worker:ragCompleted", "worker:ragError"})
 
     async def emit(self, event: str, data: dict[str, Any]) -> None:
         critical = event in self._CRITICAL_EVENTS

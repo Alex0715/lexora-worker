@@ -8,18 +8,23 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 import base64
+import io
+import json
 from lexora_worker.inference.model_manager import ModelManager
 from lexora_worker.models import (
     ActiveJob,
     ImageDispatchPayload,
     JobDispatchPayload,
     JobStatus,
+    RagIngestPayload,
     WorkerCompletedPayload,
     WorkerErrorPayload,
     WorkerImageCompletedPayload,
     WorkerImageErrorPayload,
     WorkerJobAcceptedPayload,
     WorkerJobRejectedPayload,
+    WorkerRagCompletedPayload,
+    WorkerRagErrorPayload,
     WorkerTokenPayload,
 )
 
@@ -71,6 +76,11 @@ class JobManager:
 
     async def ensure_model_loaded(self, model_id: str) -> None:
         await self._model_manager.ensure_model_loaded(model_id)
+
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed a single query string using the loaded BGE-M3 engine."""
+        embeddings = await self._model_manager.embed([text])
+        return embeddings[0]
 
     # ── Text dispatch ───────────────────────────────────────────────────────
 
@@ -209,6 +219,50 @@ class JobManager:
 
         task = asyncio.create_task(
             self._run_image_job(payload, job), name=f"img-{payload.jobId}"
+        )
+        self._tasks[payload.jobId] = task
+        task.add_done_callback(lambda t: self._on_task_done(payload.jobId, t))
+
+    # ── RAG ingest dispatch ─────────────────────────────────────────────────
+
+    async def dispatch_rag_ingest(self, payload: RagIngestPayload) -> None:
+        """Entry point called by the WebSocket layer on rag:ingest."""
+        async with self._lock:
+            if payload.jobId in self._seen_job_ids:
+                logger.warning("Duplicate rag ingest for job %s — dropped", payload.jobId)
+                return
+            if len(self._active) >= self._max_concurrency:
+                await self._emit(
+                    "worker:jobRejected",
+                    WorkerJobRejectedPayload(
+                        jobId=payload.jobId,
+                        nodeId=self._node_id,
+                        reason="capacity_full",
+                    ).model_dump(),
+                )
+                logger.warning("Rejected rag ingest job %s — capacity full", payload.jobId)
+                return
+
+            job = ActiveJob(
+                job_id=payload.jobId,
+                model="bge-m3",
+                messages=[],
+                max_tokens=0,
+                temperature=0.0,
+                status=JobStatus.PENDING,
+                start_time=time.monotonic(),
+            )
+            self._active[payload.jobId] = job
+            self._seen_job_ids.append(payload.jobId)
+
+        await self._emit(
+            "worker:jobAccepted",
+            WorkerJobAcceptedPayload(jobId=payload.jobId, nodeId=self._node_id).model_dump(),
+        )
+        logger.info("▶ RAG ingest job accepted  job_id=%s  file=%s", payload.jobId, payload.file_name)
+
+        task = asyncio.create_task(
+            self._run_rag_ingest(payload, job), name=f"rag-{payload.jobId}"
         )
         self._tasks[payload.jobId] = task
         task.add_done_callback(lambda t: self._on_task_done(payload.jobId, t))
@@ -395,6 +449,93 @@ class JobManager:
         finally:
             self._cleanup_job(payload.jobId)
 
+    async def _run_rag_ingest(self, payload: RagIngestPayload, job: ActiveJob) -> None:
+        job.status = JobStatus.RUNNING
+        start = time.monotonic()
+
+        try:
+            import httpx
+
+            # 1. Download file
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.get(payload.file_url)
+                resp.raise_for_status()
+                file_bytes = resp.content
+
+            # 2. Extract text with page numbers
+            pages = _extract_text_pages(file_bytes, payload.file_type)
+
+            # 3. Chunk with page tracking
+            chunks_meta = _chunk_pages(pages, payload.file_name)
+            if not chunks_meta:
+                raise ValueError("No text could be extracted from the file")
+
+            # 4. Embed all chunks (CPU, no CUDA sem needed)
+            texts = [c["text"] for c in chunks_meta]
+            embeddings = await self._model_manager.embed(texts)
+
+            # 5. Build result JSON
+            chunks_out = [
+                {
+                    "index": i,
+                    "text": c["text"],
+                    "embedding": embeddings[i],
+                    "metadata": {"page": c["page"], "source": payload.file_name},
+                }
+                for i, c in enumerate(chunks_meta)
+            ]
+            result = {
+                "kb_id": payload.kb_id,
+                "file_id": payload.file_id,
+                "chunks": chunks_out,
+            }
+            result_bytes = json.dumps(result).encode()
+
+            # 6. Upload result JSON via presigned PUT URL
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                put_resp = await client.put(
+                    payload.result_upload_url,
+                    content=result_bytes,
+                    headers={"Content-Type": "application/json"},
+                )
+                put_resp.raise_for_status()
+
+            elapsed_ms = (time.monotonic() - start) * 1000
+            job.status = JobStatus.COMPLETED
+            logger.info(
+                "✓ RAG ingest finished  job_id=%s  file=%s  chunks=%d  latency=%.0fms",
+                payload.jobId, payload.file_name, len(chunks_out), elapsed_ms,
+            )
+
+            # Extract the path portion from the presigned URL for the canonical result_url
+            from urllib.parse import urlparse
+            result_path = urlparse(payload.result_upload_url).path.lstrip("/")
+
+            await self._emit(
+                "worker:ragCompleted",
+                WorkerRagCompletedPayload(
+                    jobId=payload.jobId,
+                    result_url=result_path,
+                    chunk_count=len(chunks_out),
+                ).model_dump(),
+            )
+
+        except asyncio.CancelledError:
+            job.status = JobStatus.CANCELLED
+            logger.info("RAG ingest job %s cancelled", payload.jobId)
+            raise
+
+        except Exception as exc:
+            job.status = JobStatus.FAILED
+            logger.error("RAG ingest job %s failed: %s", payload.jobId, exc)
+            await self._emit(
+                "worker:ragError",
+                WorkerRagErrorPayload(jobId=payload.jobId, error=str(exc)).model_dump(),
+            )
+
+        finally:
+            self._cleanup_job(payload.jobId)
+
     # ── Shared helpers ──────────────────────────────────────────────────────
 
     def _cleanup_job(self, job_id: str) -> None:
@@ -407,6 +548,66 @@ class JobManager:
         exc = task.exception()
         if exc and not isinstance(exc, asyncio.CancelledError):
             logger.error("Unhandled task exception for job %s: %s", job_id, exc)
+
+
+# ── RAG helpers ──────────────────────────────────────────────────────────────
+
+_CHUNK_CHARS = 4000   # ~1000 tokens at ~4 chars/token
+_OVERLAP_CHARS = 600  # ~150 tokens
+
+
+def _extract_text_pages(file_bytes: bytes, file_type: str) -> list[tuple[int, str]]:
+    """Return list of (page_number, text) tuples, 1-indexed."""
+    ft = file_type.lower().strip(".")
+    if ft == "pdf":
+        try:
+            from pypdf import PdfReader
+        except ImportError:
+            raise RuntimeError("pypdf not installed — run: pip install pypdf")
+        reader = PdfReader(io.BytesIO(file_bytes))
+        return [(i + 1, page.extract_text() or "") for i, page in enumerate(reader.pages)]
+    else:
+        # Plain text — treat as a single page
+        text = file_bytes.decode("utf-8", errors="replace")
+        return [(1, text)]
+
+
+def _chunk_pages(
+    pages: list[tuple[int, str]], source: str
+) -> list[dict]:
+    """Slide a character window over the full document, tracking page numbers."""
+    # Build a flat list of (char, page_num) — we only need the page at chunk start
+    # so instead we track cumulative offsets per page.
+    segments: list[tuple[int, str]] = [(p, t) for p, t in pages if t.strip()]
+    if not segments:
+        return []
+
+    # Flatten into one string while recording page boundaries as char offsets
+    full_text = ""
+    # offsets[i] = (start_char, end_char, page_num)
+    page_spans: list[tuple[int, int, int]] = []
+    for page_num, text in segments:
+        start = len(full_text)
+        full_text += text + "\n"
+        page_spans.append((start, len(full_text), page_num))
+
+    def page_at(offset: int) -> int:
+        for start, end, pnum in page_spans:
+            if start <= offset < end:
+                return pnum
+        return page_spans[-1][2]
+
+    chunks = []
+    pos = 0
+    total = len(full_text)
+    while pos < total:
+        end = min(pos + _CHUNK_CHARS, total)
+        text = full_text[pos:end].strip()
+        if text:
+            chunks.append({"text": text, "page": page_at(pos)})
+        pos += _CHUNK_CHARS - _OVERLAP_CHARS
+
+    return chunks
 
 
 def _torch_oom_exception() -> type[Exception]:

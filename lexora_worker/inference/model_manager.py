@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 from lexora_worker.inference.capability import MODEL_VRAM_COST
+from lexora_worker.inference.embed_engine import EmbedEngine
 from lexora_worker.inference.engine import GenerationChunk, InferenceEngine
 from lexora_worker.inference.image_engine import ImageInferenceEngine
 
@@ -78,6 +79,9 @@ class ModelManager:
         self._cuda_sem = asyncio.Semaphore(1)
         self._inference_refs: dict[str, int] = {}
         self._idle_events: dict[str, asyncio.Event] = {}
+        # CPU embed engine — loaded lazily on first rag:ingest
+        self._embed_engine: EmbedEngine | None = None
+        self._embed_lock = asyncio.Lock()
 
     # ── Lifecycle ───────────────────────────────────────────────────────────
 
@@ -85,6 +89,16 @@ class ModelManager:
         self._total_vram = total_vram
         self._available_vram = total_vram
         await self.ensure_model_loaded(default_model)
+        # Load BGE-M3 eagerly so every worker is ready to answer embed queries
+        # from the first request without a cold-download delay.
+        try:
+            await self.load_embed_engine()
+        except Exception as exc:
+            logger.warning("BGE-M3 embed engine failed to load (RAG embed disabled): %s", exc)
+
+    @property
+    def embed_models(self) -> list[str]:
+        return ["bge-m3"] if self._embed_engine is not None else []
 
     async def ensure_model_loaded(self, model_id: str) -> None:
         # Manual acquire/release so we can drop the lock while waiting for
@@ -300,3 +314,19 @@ class ModelManager:
     async def unload_all(self) -> None:
         for model_id in list(self._engines.keys()):
             await self._unload_engine(model_id)
+
+    # ── Embedding (CPU, BGE-M3) ─────────────────────────────────────────────
+
+    async def load_embed_engine(self) -> None:
+        async with self._embed_lock:
+            if self._embed_engine is not None:
+                return
+            engine = EmbedEngine(model_cache_dir=self._model_cache_dir)
+            await engine.load()
+            self._embed_engine = engine
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        if self._embed_engine is None:
+            await self.load_embed_engine()
+        assert self._embed_engine is not None
+        return await self._embed_engine.embed(texts)

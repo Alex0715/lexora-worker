@@ -158,6 +158,30 @@ class WorkerModelLoadErrorPayload(BaseModel):
     error: str
 
 
+# ─── RAG ingest ───────────────────────────────────────────────────────────────
+
+
+class RagIngestPayload(BaseModel):
+    jobId: str
+    file_url: str          # presigned GET URL for the source file in R2
+    result_upload_url: str # presigned PUT URL for uploading the result JSON
+    file_name: str         # e.g. "contract.pdf"
+    file_type: str         # "pdf" | "txt"
+    kb_id: str
+    file_id: str
+
+
+class WorkerRagCompletedPayload(BaseModel):
+    jobId: str
+    result_url: str   # canonical R2 path, e.g. "rag-results/{jobId}.json"
+    chunk_count: int
+
+
+class WorkerRagErrorPayload(BaseModel):
+    jobId: str
+    error: str
+
+
 # ─── Active job record ────────────────────────────────────────────────────────
 
 
