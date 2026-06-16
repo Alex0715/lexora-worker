@@ -354,6 +354,7 @@ class ImageInferenceEngine:
             )
 
         elif vram_gb >= 6:
+            os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
             transformer = self._load_flux_transformer_nf4()
             pipe = FluxPipeline.from_pretrained(
                 self.model_id,
@@ -366,13 +367,22 @@ class ImageInferenceEngine:
             # Move VAE and CLIP-L to GPU (small, ~650 MB total)
             # T5-XXL (text_encoder_2, ~9 GB float16) stays on CPU — it runs
             # only during prompt encoding, not during the denoising loop.
-            # This means the denoising steps are pure CUDA with no CPU traffic
-            # → GIL is released → asyncio heartbeats run normally.
             pipe.vae.to(device)
             pipe.text_encoder.to(device)
             self._t5_on_cpu = True
+
+            # VAE tiling + slicing prevent the ~512 MB spike during 1024px
+            # decode on cards where VRAM is nearly full after the NF4 transformer.
+            pipe.vae.enable_tiling()
+            pipe.vae.enable_slicing()
+
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+            torch.cuda.empty_cache()
+
             logger.info(
-                "FLUX: pre-quantized NF4 transformer + CLIP/VAE on GPU, T5 on CPU"
+                "FLUX: NF4 transformer + CLIP/VAE on GPU, T5 on CPU, VAE tiling/slicing (%.1f GB VRAM)",
+                vram_gb,
             )
 
         else:
