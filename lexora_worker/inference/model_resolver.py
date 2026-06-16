@@ -112,6 +112,34 @@ MODEL_MANIFEST: dict[str, list[ModelVariant]] = {
             backend="cuda",
         ),
     ],
+    # ── Text: Qwen3 8B ───────────────────────────────────────────────────────
+    "qwen3-8b": [
+        ModelVariant(
+            min_vram_gb=18.0,
+            hf_repo="Qwen/Qwen3-8B",
+            format="safetensors",
+            label="fp16 (CUDA, ≥18 GB)",
+            backend="cuda",
+        ),
+        ModelVariant(
+            min_vram_gb=6.5,
+            hf_repo="bartowski/Qwen3-8B-GGUF",
+            format="gguf",
+            filename="Qwen3-8B-Q5_K_M.gguf",
+            quant_repo="Qwen/Qwen3-8B",
+            label="GGUF Q5_K_M (CUDA, 6.5 GB)",
+            backend="cuda",
+        ),
+        ModelVariant(
+            min_vram_gb=5.5,
+            hf_repo="bartowski/Qwen3-8B-GGUF",
+            format="gguf",
+            filename="Qwen3-8B-Q4_K_M.gguf",
+            quant_repo="Qwen/Qwen3-8B",
+            label="GGUF Q4_K_M (CUDA, 5.5 GB)",
+            backend="cuda",
+        ),
+    ],
     # ── Image: FLUX.1-schnell ─────────────────────────────────────────────────
     "flux.1-schnell": [
         ModelVariant(

@@ -367,7 +367,8 @@ _MODEL_RECOMMENDATIONS = {
     "mac_medium":  ("mlx-community/Llama-3.1-8B-Instruct-4bit",  "Llama 3.1 8B  (balanced, 4-bit, MLX)"),
     "mac_large":   ("mlx-community/Llama-3.1-70B-Instruct-4bit", "Llama 3.1 70B (powerful, 4-bit, MLX)"),
     "gpu_small":   ("meta-llama/Llama-3.2-3B-Instruct",          "Llama 3.2 3B  (fast, NVIDIA)"),
-    "gpu_medium":  ("meta-llama/Llama-3.1-8B-Instruct",          "Llama 3.1 8B  (balanced, NVIDIA)"),
+    "gpu_medium":  ("Qwen/Qwen3-8B",                             "Qwen3 8B      (balanced, NVIDIA)"),
+    "gpu_medium_llama": ("meta-llama/Llama-3.1-8B-Instruct",    "Llama 3.1 8B  (balanced, NVIDIA)"),
     "gpu_large":   ("meta-llama/Llama-3.1-70B-Instruct",         "Llama 3.1 70B (powerful, NVIDIA)"),
     "gpu_image":   ("black-forest-labs/FLUX.1-schnell",          "FLUX.1 Schnell (image generation, NVIDIA)"),
     "cpu":         ("microsoft/Phi-3-mini-4k-instruct",           "Phi-3 Mini    (CPU-friendly)"),
@@ -395,6 +396,7 @@ def _recommend_models(gpu_model: str, vram_gb: float) -> list[tuple[str, str]]:
         opts.append(_MODEL_RECOMMENDATIONS["gpu_large"])
     if vram_gb >= 12:
         opts.append(_MODEL_RECOMMENDATIONS["gpu_medium"])
+        opts.append(_MODEL_RECOMMENDATIONS["gpu_medium_llama"])
     if vram_gb >= 8:
         opts.append(_MODEL_RECOMMENDATIONS["gpu_image"])
     opts.append(_MODEL_RECOMMENDATIONS["gpu_small"])
