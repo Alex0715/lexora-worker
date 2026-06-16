@@ -486,14 +486,14 @@ class InferenceEngine:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _build_prompt(messages: list[dict[str, str]], tokenizer: Any | None) -> str:
+    def _build_prompt(self, messages: list[dict[str, str]], tokenizer: Any | None) -> str:
         """Use the tokenizer's chat template when available, else fall back to manual format."""
         if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
             try:
-                return tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
+                kwargs: dict[str, Any] = {"tokenize": False, "add_generation_prompt": True}
+                if "qwen3" in self.model_id.lower():
+                    kwargs["enable_thinking"] = False
+                return tokenizer.apply_chat_template(messages, **kwargs)
             except Exception:
                 pass
         return InferenceEngine._format_messages(messages)
