@@ -39,10 +39,25 @@ class EmbedEngine:
         logger.info("BGE-M3 embed engine loaded (CPU via FlagEmbedding)")
 
     def _load_sync(self) -> Any:
-        return BGEM3FlagModel(
-            self.MODEL_ID,
-            use_fp16=False,   # CPU: fp16 is not beneficial, fp32 is correct
-        )
+        # Force CPU. FlagEmbedding auto-selects CUDA whenever torch.cuda is
+        # available, which on a GPU node collides with the inference engine and
+        # OOMs. The device kwarg was renamed `device` -> `devices` across
+        # FlagEmbedding versions, so pick whichever the installed one accepts.
+        import inspect
+
+        kwargs: dict[str, Any] = {
+            "use_fp16": False,  # CPU: fp16 is not beneficial, fp32 is correct
+        }
+        if self._model_cache_dir:
+            kwargs["cache_dir"] = self._model_cache_dir
+
+        params = inspect.signature(BGEM3FlagModel.__init__).parameters
+        if "devices" in params:
+            kwargs["devices"] = "cpu"
+        elif "device" in params:
+            kwargs["device"] = "cpu"
+
+        return BGEM3FlagModel(self.MODEL_ID, **kwargs)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if self._model is None:
