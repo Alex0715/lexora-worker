@@ -52,12 +52,20 @@ class EmbedEngine:
         logger.info("BGE-M3 embed engine loaded (CPU, explicit XLMRoberta)")
 
     def _load_sync(self) -> None:
-        kwargs: dict[str, Any] = {}
-        if self._model_cache_dir:
-            kwargs["cache_dir"] = self._model_cache_dir
+        import glob
+        import os
 
-        self._tokenizer = XLMRobertaTokenizerFast.from_pretrained(self.MODEL_ID, **kwargs)
-        self._model = XLMRobertaModel.from_pretrained(self.MODEL_ID, **kwargs)
+        cache_dir = self._model_cache_dir or os.path.expanduser("~/.cache/huggingface/hub")
+        slug = self.MODEL_ID.replace("/", "--")
+        snapshots = glob.glob(os.path.join(cache_dir, f"models--{slug}", "snapshots", "*/"))
+        if snapshots:
+            local_path = snapshots[0].rstrip("/")
+            logger.info("Loading BGE-M3 from local snapshot: %s", local_path)
+        else:
+            local_path = self.MODEL_ID  # fall back to Hub download
+
+        self._tokenizer = XLMRobertaTokenizerFast.from_pretrained(local_path)
+        self._model = XLMRobertaModel.from_pretrained(local_path)
         self._model.eval()
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
