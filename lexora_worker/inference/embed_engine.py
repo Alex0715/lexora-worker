@@ -55,7 +55,7 @@ class EmbedEngine:
         import glob
         import os
 
-        hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+        hf_home = os.environ.get("HF_HOME", "/workspace/.hf_home")
         cache_dir = self._model_cache_dir or os.path.join(hf_home, "hub")
         slug = self.MODEL_ID.replace("/", "--")
         snapshots = glob.glob(os.path.join(cache_dir, f"models--{slug}", "snapshots", "*/"))
