@@ -2,24 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from functools import partial
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 try:
-    from FlagEmbedding import BGEM3FlagModel
-    _FLAG_AVAILABLE = True
+    from sentence_transformers import SentenceTransformer
+    _ST_AVAILABLE = True
 except ImportError:
-    _FLAG_AVAILABLE = False
-    logger.warning("FlagEmbedding not installed — BGE-M3 unavailable. Run: pip install FlagEmbedding")
+    _ST_AVAILABLE = False
+    logger.warning("sentence-transformers not installed — BGE-M3 unavailable. Run: pip install sentence-transformers")
 
 
 class EmbedEngine:
-    """CPU-based BGE-M3 embedding engine using BAAI's FlagEmbedding library.
+    """CPU-based BGE-M3 embedding engine using sentence-transformers.
 
-    FlagEmbedding is the official BAAI library for BGE-M3 and handles the
-    model's custom architecture correctly. Runs in a thread-pool executor so
+    sentence-transformers tracks transformers compatibility and handles
+    BGE-M3's dense embeddings correctly. Runs in a thread-pool executor so
     the asyncio event loop stays unblocked during embedding.
     """
 
@@ -30,34 +31,19 @@ class EmbedEngine:
         self._model_cache_dir = model_cache_dir
 
     async def load(self) -> None:
-        if not _FLAG_AVAILABLE:
+        if not _ST_AVAILABLE:
             raise RuntimeError(
-                "FlagEmbedding is not installed. Run: pip install FlagEmbedding"
+                "sentence-transformers is not installed. Run: pip install sentence-transformers"
             )
         loop = asyncio.get_event_loop()
         self._model = await loop.run_in_executor(None, self._load_sync)
-        logger.info("BGE-M3 embed engine loaded (CPU via FlagEmbedding)")
+        logger.info("BGE-M3 embed engine loaded (CPU via sentence-transformers)")
 
     def _load_sync(self) -> Any:
-        # Force CPU. FlagEmbedding auto-selects CUDA whenever torch.cuda is
-        # available, which on a GPU node collides with the inference engine and
-        # OOMs. The device kwarg was renamed `device` -> `devices` across
-        # FlagEmbedding versions, so pick whichever the installed one accepts.
-        import inspect
-
-        kwargs: dict[str, Any] = {
-            "use_fp16": False,  # CPU: fp16 is not beneficial, fp32 is correct
-        }
+        kwargs: dict[str, Any] = {"device": "cpu"}
         if self._model_cache_dir:
-            kwargs["cache_dir"] = self._model_cache_dir
-
-        params = inspect.signature(BGEM3FlagModel.__init__).parameters
-        if "devices" in params:
-            kwargs["devices"] = "cpu"
-        elif "device" in params:
-            kwargs["device"] = "cpu"
-
-        return BGEM3FlagModel(self.MODEL_ID, **kwargs)
+            kwargs["cache_folder"] = self._model_cache_dir
+        return SentenceTransformer(self.MODEL_ID, **kwargs)
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if self._model is None:
@@ -65,10 +51,15 @@ class EmbedEngine:
         loop = asyncio.get_event_loop()
         output = await loop.run_in_executor(
             None,
-            partial(self._model.encode, texts, batch_size=12, max_length=8192),
+            partial(
+                self._model.encode,
+                texts,
+                batch_size=12,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+            ),
         )
-        # FlagEmbedding returns a dict; dense_vecs is the standard embedding
-        return output["dense_vecs"].tolist()
+        return output.tolist()
 
     async def unload(self) -> None:
         self._model = None
