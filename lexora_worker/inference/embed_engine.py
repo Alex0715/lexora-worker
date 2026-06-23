@@ -55,7 +55,8 @@ class EmbedEngine:
         import glob
         import os
 
-        cache_dir = self._model_cache_dir or os.path.expanduser("~/.cache/huggingface/hub")
+        hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+        cache_dir = self._model_cache_dir or os.path.join(hf_home, "hub")
         slug = self.MODEL_ID.replace("/", "--")
         snapshots = glob.glob(os.path.join(cache_dir, f"models--{slug}", "snapshots", "*/"))
         if snapshots:
