@@ -25,10 +25,9 @@ dependencies = [
 
 [project.optional-dependencies]
 rag = [
-    "FlagEmbedding>=1.2.0",
+    "fastembed>=0.3.0",
     "pypdf>=4.0.0",
     "httpx>=0.27.0",
-    "sentencepiece>=0.1.99",
 ]
 inference = [
     "vllm>=0.3.0",
